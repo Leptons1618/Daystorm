@@ -1,0 +1,29 @@
+{
+  "file": "/content/fusion.onnx",
+  "size_mb": 0.2,
+  "opset": 17,
+  "checks": [
+    {
+      "case": "batch=1 coverage=100%",
+      "max_abs_delta": 5.960464477539062e-07,
+      "ok": true
+    },
+    {
+      "case": "batch=2 coverage=100%",
+      "max_abs_delta": 5.960464477539062e-07,
+      "ok": true
+    },
+    {
+      "case": "batch=5 coverage=50%",
+      "max_abs_delta": 7.152557373046875e-07,
+      "ok": true
+    },
+    {
+      "case": "batch=3 coverage=0%",
+      "max_abs_delta": 5.960464477539062e-07,
+      "ok": true
+    }
+  ],
+  "worst_abs_delta": 7.152557373046875e-07,
+  "passed": true
+}

@@ -14,10 +14,12 @@ rather than training one from scratch: the backbone stays, the fusion layer is
 new. Trainable surface is ~6 M parameters against a 3 B backbone.
 
 ```bash
-uv venv --python 3.12 .venv && uv pip install -e ".[dev]"
-make test            # 43 tests, no download required
+uv venv --python 3.12 .venv && uv pip install -e ".[dev,serve]"
+make test            # 69 tests, no download required
 make demo            # print one aligned window from a synthetic scene
 make gate            # Phase 1 go/no-go: can the fusion stack carry information?
+make eval            # held-out metrics + per-modality ablation + failure gallery
+make bench           # stage-by-stage latency
 ```
 
 ## Requirement coverage
@@ -29,10 +31,11 @@ make gate            # Phase 1 go/no-go: can the fusion stack carry information?
 | Adapt and fine-tune existing GenAI architectures | New encoders + projectors grafted onto a frozen backbone; two-stage recipe | `train/stage_a.py` |
 | Hands-on foundation-model fine-tuning | QLoRA on the backbone in Stage B | `train/stage_b.py` *(phase 2)* |
 | Vision-language and audio-text fusion | Both paths present, ablated per modality | `model/encoders.py` |
-| Model evaluation and testing | 43 tests incl. property tests for causality and masking | `tests/` |
-| Latency and production deployment | Quantization sweep, p50/p95, FastAPI service | *(phase 3-4)* |
-| Distributed training *(nice to have)* | FSDP config + a real 2-GPU run | *(phase 3)* |
-| MLOps automation and monitoring *(nice to have)* | MLflow, CI, embedding-drift monitor | *(phase 4)* |
+| Hands-on foundation-model fine-tuning | QLoRA adapters + two learning rates | `train/stage_b.py` |
+| Model evaluation and testing | 69 tests; grounding metrics, ablation, failure gallery | `tests/`, `eval/` |
+| Latency and production deployment | T4 dtype/quant sweep, compile, ONNX (verified), per-stage p50/p95/p99; FastAPI + Docker | `bench/`, `serve/` |
+| Distributed training *(nice to have)* | FSDP/DDP wrapper, accelerate config, Kaggle 2×T4 kernel | `train/dist.py`, `kaggle/` |
+| MLOps automation and monitoring *(nice to have)* | CI incl. a smoke train; drift monitor with a stuck-signal check | `.github/`, `monitor/` |
 
 ## The alignment contract
 
@@ -97,10 +100,65 @@ src/daystorm/
 scripts/              colab sync/train wrappers, nuScenes download, precompute
 ```
 
+## Results so far
+
+Held-out split, 16 windows, scene-level partition, **byte-level backbone on CPU**.
+Read `MODEL_CARD.md` before quoting any of this — the camera and audio caches
+are content-free, so those two ablations measure scene-identity leakage rather
+than perception.
+
+| run | exact match | manoeuvre acc | numeric MAE | hallucination |
+|---|---|---|---|---|
+| full | 0.00 | 1.00 | 0.225 | 0.000 |
+| no camera | 0.00 | 1.00 | 0.206 (−0.02) | 0.000 |
+| **no CAN** | 0.00 | 1.00 | **0.663 (+0.44)** | **0.208 (+0.21)** |
+| no radar | 0.00 | 1.00 | 0.323 (+0.10) | 0.000 |
+| no audio | 0.00 | 1.00 | 0.419 (+0.19) | 0.000 |
+
+Removing the CAN bus nearly triples numeric error and takes hallucination from
+0% to 21%: with the telemetry gone the model starts inventing quantities. That
+is the architecture behaving as designed.
+
+### Measured on a Tesla T4
+
+Full numbers in `reports/phase3_status.md`. The finding worth repeating:
+
+**`torch.cuda.is_bf16_supported()` returns `True` on a T4, and bf16 is 20x
+slower.** PyTorch counts emulation as support, so an A100 recipe copied onto
+Turing does not error — it runs at a twentieth of the speed. Fusion stack, p50
+at batch 32:
+
+| config | eager | `torch.compile` | vs fp16 |
+|---|---|---|---|
+| fp32 | 4.868 ms | 3.370 ms | 1.35x slower |
+| **fp16** | **3.597 ms** | **2.557 ms** | — |
+| bf16 *(emulated)* | 74.149 ms | 72.829 ms | **20.6x slower** |
+| nf4 | 6.271 ms | 7.126 ms | 1.74x slower |
+
+nf4 losing to fp32 is expected and worth saying out loud: the fusion stack is
+~6 M parameters, so dequantisation overhead swamps any memory saving. 4-bit is
+for the 3 B backbone, not for this.
+
+End-to-end, one window:
+
+| stage | CPU p50 | T4 p50 | share (T4) |
+|---|---|---|---|
+| align | 0.04 ms | 0.15 ms | 0.1% |
+| fuse | 0.82 ms | 3.41 ms | 1.5% |
+| decode | 233.73 ms | 228.93 ms | 98.5% |
+
+**The GPU barely helps** — 2% on decode — because the backbone is small enough
+to be bound by per-token kernel launch latency, not compute. Batched decode or
+a KV cache with CUDA graphs will move that number; a bigger GPU will not.
+
+Training on T4: Stage A 700 steps in 38 s (CPU: 139 s, 3.7x); Stage B QLoRA
+70 ms/step at 16 windows/step; the Phase 1 gate passes with a cleaner control
+than on CPU (100% exact fused vs **0%** shuffled).
+
 ## Status
 
 - **Phase 0 — complete.** Alignment, normalization, windowing, the nuScenes
-  adapter, and 32 tests covering the five rules.
+  adapter, and tests covering the five rules.
 - **Phase 1 — complete.** Encoders, masked pooling, projectors, the Stage A
   trainer, and the overfit gate. Latest gate run (6 windows, byte-level
   backbone, CPU):
@@ -113,6 +171,18 @@ scripts/              colab sync/train wrappers, nuScenes download, precompute
   The control is the point: the answers are ~97% shared boilerplate, so a
   loss margin proves nothing. Exact match requires the digits, and the
   digits only exist in the sensors.
-- Phases 2–4 are specified in `daystorm-plan.html`.
+- **Phase 2 — complete.** Stage B QLoRA (two learning rates, adapters only),
+  the grounding metrics above, per-modality ablation, failure gallery.
+- **Phase 3 — measured on a T4**, except the 2-GPU comparison. Quantization and
+  dtype sweep, `torch.compile`, end-to-end latency, and ONNX export (verified to
+  7.15e-07 across four cases including a fully-masked batch). The FSDP-vs-DDP
+  run needs two GPUs and free Colab gives one — code written, single-GPU
+  baseline measured, blockers documented in `reports/phase3_status.md`.
+- **Phase 4 — mostly complete.** FastAPI service (alignment server-side,
+  liveness/readiness split, coverage in every response), Dockerfile, CI with a
+  smoke train, drift monitor, and a Gradio demo with **live sensor ablation**
+  (`space/app.py`, runs locally). Deploying it needs HF PRO — see
+  `space/DEPLOY.md`. No demo recording yet.
+- Full plan: `daystorm-plan.html`.
 
 MIT licensed. Data: nuScenes (CC BY-NC-SA 4.0) is not redistributed here.

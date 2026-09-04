@@ -1,0 +1,123 @@
+{
+  "device": "Tesla T4",
+  "torch": "2.11.0+cu128",
+  "d_model": 2048,
+  "runs": {
+    "fp32": {
+      "batch1": {
+        "p50_ms": 3.585,
+        "p95_ms": 3.86,
+        "p99_ms": 3.989,
+        "mean_ms": 3.615,
+        "n": 80,
+        "batch": 1,
+        "per_window_ms": 3.585
+      },
+      "batch8": {
+        "p50_ms": 3.976,
+        "p95_ms": 5.806,
+        "p99_ms": 5.965,
+        "mean_ms": 4.21,
+        "n": 80,
+        "batch": 8,
+        "per_window_ms": 0.497
+      },
+      "batch32": {
+        "p50_ms": 4.868,
+        "p95_ms": 5.633,
+        "p99_ms": 5.783,
+        "mean_ms": 5.046,
+        "n": 80,
+        "batch": 32,
+        "per_window_ms": 0.152
+      }
+    },
+    "fp16": {
+      "batch1": {
+        "p50_ms": 3.534,
+        "p95_ms": 4.521,
+        "p99_ms": 4.874,
+        "mean_ms": 3.626,
+        "n": 80,
+        "batch": 1,
+        "per_window_ms": 3.534
+      },
+      "batch8": {
+        "p50_ms": 3.586,
+        "p95_ms": 5.546,
+        "p99_ms": 6.04,
+        "mean_ms": 3.769,
+        "n": 80,
+        "batch": 8,
+        "per_window_ms": 0.448
+      },
+      "batch32": {
+        "p50_ms": 3.597,
+        "p95_ms": 3.834,
+        "p99_ms": 3.956,
+        "mean_ms": 3.626,
+        "n": 80,
+        "batch": 32,
+        "per_window_ms": 0.112
+      }
+    },
+    "bf16": {
+      "batch1": {
+        "p50_ms": 5.863,
+        "p95_ms": 7.959,
+        "p99_ms": 8.652,
+        "mean_ms": 6.098,
+        "n": 80,
+        "batch": 1,
+        "per_window_ms": 5.863
+      },
+      "batch8": {
+        "p50_ms": 21.25,
+        "p95_ms": 33.672,
+        "p99_ms": 35.926,
+        "mean_ms": 24.447,
+        "n": 80,
+        "batch": 8,
+        "per_window_ms": 2.656
+      },
+      "batch32": {
+        "p50_ms": 74.149,
+        "p95_ms": 108.733,
+        "p99_ms": 113.563,
+        "mean_ms": 79.858,
+        "n": 80,
+        "batch": 32,
+        "per_window_ms": 2.317
+      }
+    },
+    "nf4": {
+      "batch1": {
+        "p50_ms": 5.014,
+        "p95_ms": 7.477,
+        "p99_ms": 7.79,
+        "mean_ms": 5.263,
+        "n": 80,
+        "batch": 1,
+        "per_window_ms": 5.014
+      },
+      "batch8": {
+        "p50_ms": 5.166,
+        "p95_ms": 5.544,
+        "p99_ms": 5.915,
+        "mean_ms": 5.227,
+        "n": 80,
+        "batch": 8,
+        "per_window_ms": 0.646
+      },
+      "batch32": {
+        "p50_ms": 6.271,
+        "p95_ms": 8.37,
+        "p99_ms": 9.51,
+        "mean_ms": 6.553,
+        "n": 80,
+        "batch": 32,
+        "per_window_ms": 0.196
+      }
+    }
+  }
+}

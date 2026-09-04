@@ -1,0 +1,28 @@
+# accelerate config for the 2x T4 Stage B run (Kaggle free tier).
+#
+# fp16, never bf16: T4 is Turing and has no bfloat16 unit. Copying an A100
+# recipe here produces either a hard error or a silent fallback that makes the
+# run slower than single-GPU.
+compute_environment: LOCAL_MACHINE
+distributed_type: FSDP
+downcast_bf16: 'no'
+machine_rank: 0
+main_training_function: main
+mixed_precision: fp16
+num_machines: 1
+num_processes: 2
+rdzv_backend: static
+same_network: true
+use_cpu: false
+
+fsdp_config:
+  fsdp_sharding_strategy: FULL_SHARD
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_backward_prefetch: BACKWARD_PRE
+  fsdp_state_dict_type: SHARDED_STATE_DICT
+  fsdp_offload_params: false
+  fsdp_sync_module_states: true
+  # required for per-parameter-group learning rates: Stage B runs the LoRA
+  # adapters an order of magnitude above the fusion stack, which FSDP cannot
+  # express once parameters are flattened
+  fsdp_use_orig_params: true

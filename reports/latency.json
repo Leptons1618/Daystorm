@@ -1,0 +1,36 @@
+{
+  "device": "cpu",
+  "torch": "2.14.0+cpu",
+  "d_model": 2048,
+  "runs": {
+    "fp32": {
+      "batch1": {
+        "p50_ms": 1.382,
+        "p95_ms": 1.444,
+        "p99_ms": 1.455,
+        "mean_ms": 1.385,
+        "n": 40,
+        "batch": 1,
+        "per_window_ms": 1.382
+      },
+      "batch8": {
+        "p50_ms": 6.389,
+        "p95_ms": 6.509,
+        "p99_ms": 6.518,
+        "mean_ms": 6.384,
+        "n": 40,
+        "batch": 8,
+        "per_window_ms": 0.799
+      }
+    },
+    "fp16": {
+      "skipped": "requires CUDA, running on cpu"
+    },
+    "bf16": {
+      "skipped": "requires CUDA, running on cpu"
+    },
+    "nf4": {
+      "skipped": "requires CUDA, running on cpu"
+    }
+  }
+}

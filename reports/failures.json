@@ -1,0 +1,58 @@
+[
+  {
+    "worst_abs_error": 1.0,
+    "event": "cruise",
+    "question": "What is the vehicle doing?",
+    "reference": "Steady cruising at 10.2 m/s, steering within 2 deg and no brake demand. Lead vehicle steady near 30 m.",
+    "prediction": "Steady cruising at 10.1 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m."
+  },
+  {
+    "worst_abs_error": 1.0,
+    "event": "cruise",
+    "question": "What is the vehicle doing?",
+    "reference": "Steady cruising at 10.2 m/s, steering within 2 deg and no brake demand. Lead vehicle steady near 30 m. Sensor coverage incomplete this window: radar.",
+    "prediction": "Steady cruising at 10.7 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m."
+  },
+  {
+    "worst_abs_error": 1.0,
+    "event": "cruise",
+    "question": "What is the vehicle doing?",
+    "reference": "Steady cruising at 10.2 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 29 m. Sensor coverage incomplete this window: radar.",
+    "prediction": "Steady cruising at 10.4 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m."
+  },
+  {
+    "worst_abs_error": 1.0,
+    "event": "cruise",
+    "question": "What is the vehicle doing?",
+    "reference": "Steady cruising at 10.2 m/s, steering within 2 deg and no brake demand. Lead vehicle steady near 30 m.",
+    "prediction": "Steady cruising at 10.4 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m."
+  },
+  {
+    "worst_abs_error": 1.0,
+    "event": "cruise",
+    "question": "What is the vehicle doing?",
+    "reference": "Steady cruising at 10.2 m/s, steering within 2 deg and no brake demand. Lead vehicle steady near 30 m.",
+    "prediction": "Steady cruising at 9.9 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m."
+  },
+  {
+    "worst_abs_error": 0.5,
+    "event": "cruise",
+    "question": "What is the vehicle doing?",
+    "reference": "Steady cruising at 10.2 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m.",
+    "prediction": "Steady cruising at 10.7 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m."
+  },
+  {
+    "worst_abs_error": 0.5,
+    "event": "cruise",
+    "question": "What is the vehicle doing?",
+    "reference": "Steady cruising at 10.2 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m.",
+    "prediction": "Steady cruising at 10.7 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m."
+  },
+  {
+    "worst_abs_error": 0.5,
+    "event": "cruise",
+    "question": "What is the vehicle doing?",
+    "reference": "Steady cruising at 10.2 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m.",
+    "prediction": "Steady cruising at 10.7 m/s, steering within 1 deg and no brake demand. Lead vehicle steady near 30 m."
+  }
+]
