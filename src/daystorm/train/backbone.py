@@ -99,11 +99,22 @@ class HFBackbone(nn.Module):
     day if you copy an A100 recipe.
     """
 
-    def __init__(self, model_id: str = "Qwen/Qwen2.5-VL-3B-Instruct", load_in_4bit: bool = True):
+    def __init__(
+        self,
+        model_id: str = "Qwen/Qwen2.5-VL-3B-Instruct",
+        load_in_4bit: bool = True,
+        dtype: str = "auto",
+    ):
         super().__init__()
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         kwargs: dict = {"device_map": "auto", "attn_implementation": "sdpa"}
+        resolved = {
+            "fp16": torch.float16,
+            "fp32": torch.float32,
+            "bf16": torch.bfloat16,
+            "auto": torch.float16 if torch.cuda.is_available() else torch.float32,
+        }[dtype]
         if load_in_4bit:
             from transformers import BitsAndBytesConfig
 
@@ -111,12 +122,30 @@ class HFBackbone(nn.Module):
                 load_in_4bit=True,
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_use_double_quant=True,
-                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_compute_dtype=resolved,
             )
+        else:
+            # Without a quantization config transformers loads in fp32, which on a
+            # T4 doubles the VRAM and roughly doubles the step time for nothing.
+            # Only on CUDA, though: CPU fp16 matmul has no fast kernel and falls
+            # back to something an order of magnitude slower than fp32.
+            #
+            # fp32 is not merely the slow option. Some models carry residual-stream
+            # activations within a factor of two of the fp16 ceiling of 65504 - a
+            # forward pass then produces inf, every gradient is non-finite, and the
+            # loss sits flat while GradScaler skips every step. SmolLM2-360M peaks
+            # at 60694 on this path; see reports/phase4_backbone_ladder.md.
+            kwargs["dtype"] = resolved
         self.tok = AutoTokenizer.from_pretrained(model_id)
         if self.tok.pad_token is None:
             self.tok.pad_token = self.tok.eos_token
-        self.lm = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        try:
+            self.lm = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        except TypeError:  # transformers < 4.56 spells the dtype argument differently
+            if "dtype" not in kwargs:
+                raise
+            kwargs["torch_dtype"] = kwargs.pop("dtype")
+            self.lm = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
         self.lm.requires_grad_(False)
         self.d_model = int(self.lm.config.hidden_size)
         self.max_len = 320

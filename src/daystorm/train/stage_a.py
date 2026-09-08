@@ -107,6 +107,11 @@ def to_torch(batch: dict, device: str):
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--backbone", default="tiny", help="'tiny' or a HF model id")
+    p.add_argument("--load-4bit", action="store_true",
+                   help="NF4-quantise a pretrained backbone; fp16 otherwise")
+    p.add_argument("--backbone-dtype", default="auto", choices=("auto", "fp16", "fp32", "bf16"),
+                   help="'auto' is fp16 on CUDA, fp32 on CPU. Use fp32 if the loss "
+                        "sits flat: some models overflow fp16 in the residual stream")
     p.add_argument("--scenes", type=int, default=24)
     p.add_argument("--overfit", type=int, default=0, help="run the go/no-go gate on N samples")
     p.add_argument("--steps", type=int, default=400)
@@ -120,9 +125,14 @@ def main() -> int:
                    help="required exact-match rate with the real fusion prefix")
     p.add_argument("--gate-control-max", type=float, default=0.50,
                    help="maximum exact-match rate tolerated with a shuffled prefix")
+    p.add_argument("--gate-json", default="",
+                   help="write the gate verdict and cost of this backbone here")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
 
+    t_start = time.time()
+    if str(args.device).startswith("cuda"):
+        torch.cuda.reset_peak_memory_stats()
     torch.manual_seed(args.seed)
     scenes = [make_scene(seed=i) for i in range(args.scenes)]
     samples = build_samples(scenes)
@@ -150,7 +160,14 @@ def main() -> int:
 
     def run(shuffle_prefix: bool) -> float:
         torch.manual_seed(args.seed)
-        backbone = build_backbone(args.backbone).to(args.device)
+        kw = (
+            {}
+            if args.backbone in ("tiny", "none")
+            else {"load_in_4bit": args.load_4bit, "dtype": args.backbone_dtype}
+        )
+        backbone = build_backbone(args.backbone, **kw)
+        if not freeze_backbone:
+            backbone = backbone.to(args.device)  # HFBackbone is placed by device_map
         backbone.requires_grad_(not freeze_backbone)
         fusion = DaystormFusion(FEATURE_DIMS, d_model=backbone.d_model).to(args.device)
 
@@ -160,6 +177,13 @@ def main() -> int:
         opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=0.01)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.steps)
         rng = np.random.default_rng(args.seed)
+        # A frozen pretrained backbone runs in fp16 (a T4 has no bf16). Gradients
+        # travel through it to reach the fp32 fusion stack, and fp16 gradients
+        # underflow to zero unscaled - the loss then sits flat and reads as a
+        # fusion bug rather than the numerics problem it is.
+        scaler = torch.amp.GradScaler(
+            "cuda", enabled=freeze_backbone and str(args.device).startswith("cuda")
+        )
         started, last = time.time(), float("nan")
         tag = "control" if shuffle_prefix else "fused  "
 
@@ -179,9 +203,11 @@ def main() -> int:
             loss = backbone(prefix, ids, labels)
 
             opt.zero_grad(set_to_none=True)
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(params, 1.0)
-            opt.step()
+            scaler.step(opt)
+            scaler.update()
             sched.step()
             last = float(loss.item())
 
@@ -221,6 +247,35 @@ def main() -> int:
         print(f"[gate] control  loss {ctrl_loss:.4f}   exact {ctrl_exact:.0%}   "
               f"(need exact <= {args.gate_control_max:.0%})")
         print(f"[gate] {'PASS' if ok else 'FAIL'}")
+        if args.gate_json:
+            cuda = str(args.device).startswith("cuda")
+            Path(args.gate_json).write_text(
+                json.dumps(
+                    {
+                        "backbone": args.backbone,
+                        "d_model": int(backbone.d_model),
+                        "load_in_4bit": bool(args.load_4bit),
+                        "backbone_dtype": args.backbone_dtype,
+                        "backbone_params": sum(q.numel() for q in backbone.parameters()),
+                        "fusion_params": sum(q.numel() for q in fusion.parameters()),
+                        "samples": len(train),
+                        "steps": args.steps,
+                        "batch": args.batch,
+                        "fused_loss": last,
+                        "fused_exact": exact,
+                        "control_loss": ctrl_loss,
+                        "control_exact": ctrl_exact,
+                        "pass": bool(ok),
+                        "wall_s": round(time.time() - t_start, 1),
+                        "peak_vram_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2)
+                        if cuda
+                        else None,
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
+            print(f"[gate] verdict -> {args.gate_json}")
         if last >= args.gate_threshold or exact < args.gate_exact:
             print("[gate] cannot reconstruct a handful of windows: look for a detached")
             print("[gate] tensor, an inverted mask, or a projector with no gradient.")

@@ -1,0 +1,18 @@
+{
+  "backbone": "Qwen/Qwen2.5-3B-Instruct",
+  "d_model": 2048,
+  "load_in_4bit": true,
+  "backbone_dtype": "auto",
+  "backbone_params": 1698672640,
+  "fusion_params": 6221060,
+  "samples": 8,
+  "steps": 300,
+  "batch": 4,
+  "fused_loss": 0.001029375591315329,
+  "fused_exact": 1.0,
+  "control_loss": 0.06169149652123451,
+  "control_exact": 0.125,
+  "pass": true,
+  "wall_s": 1312.0,
+  "peak_vram_gb": 11.81
+}

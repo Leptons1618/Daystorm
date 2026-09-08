@@ -155,6 +155,32 @@ Training on T4: Stage A 700 steps in 38 s (CPU: 139 s, 3.7x); Stage B QLoRA
 70 ms/step at 16 windows/step; the Phase 1 gate passes with a cleaner control
 than on CPU (100% exact fused vs **0%** shuffled).
 
+### How small can the frozen backbone get?
+
+Full study in `reports/phase4_backbone_ladder.md`. Same gate, same 8 windows,
+same 300 steps on every row, backbone frozen throughout — only the fusion stack
+trains, so scale is the only variable that moves.
+
+| backbone | trainable | peak VRAM | fused exact | control exact | gate |
+|---|---|---|---|---|---|
+| SmolLM2-135M-Instruct | 1.45% | 2.61 GB | **1.00** | 0.25 | **PASS** |
+| SmolLM2-360M-Instruct | 0.73% | 4.32 GB | 0.00 | 0.00 | FAIL *(fp16 overflow)* |
+| Qwen2.5-0.5B-Instruct | 0.51% | 6.13 GB | **1.00** | 0.00 | **PASS** |
+| Qwen2.5-1.5B-Instruct | 0.27% | 10.95 GB | **1.00** | 0.00 | **PASS** |
+| Qwen2.5-3B-Instruct (nf4) | 0.20% | 11.81 GB | **1.00** | 0.125 | **PASS** |
+
+**The idea does not need scale.** A 135 M frozen instruct model reproduces all
+eight answers verbatim from 16 fusion tokens, and fails to when those tokens
+are shuffled across the batch. The one failure is arithmetic, not capacity:
+SmolLM2-360M is the only backbone whose residual stream reaches the fp16
+ceiling of 65504 (2 of 20 probed forward passes exceed it; the models either
+side of it peak at 0.41x and 0.01x), so `GradScaler` skips every step and the
+loss never leaves its starting value.
+
+The binding constraint is VRAM, not compute — gradients reach the projectors
+*through* the frozen decoder, so every layer's activations are kept for the
+backward pass even though no weight in it updates.
+
 ## Status
 
 - **Phase 0 — complete.** Alignment, normalization, windowing, the nuScenes
@@ -176,8 +202,15 @@ than on CPU (100% exact fused vs **0%** shuffled).
 - **Phase 3 — measured on a T4**, except the 2-GPU comparison. Quantization and
   dtype sweep, `torch.compile`, end-to-end latency, and ONNX export (verified to
   7.15e-07 across four cases including a fully-masked batch). The FSDP-vs-DDP
-  run needs two GPUs and free Colab gives one — code written, single-GPU
-  baseline measured, blockers documented in `reports/phase3_status.md`.
+  run still has not produced a number: it now has two GPUs (Kaggle `GPU T4 x2`,
+  account verified) and the distributed section emitted no output on that run,
+  with a 0-byte kernel log. Local reproduction of the same command succeeds, so
+  the cause is environment-specific — trail in `reports/phase3_status.md`.
+- **Backbone ladder — complete.** Six frozen pretrained backbones from 135 M to
+  3 B run through the Phase 1 gate on a T4; five pass, including the smallest
+  real one. Latency, end-to-end timing and ONNX export reproduced on second
+  hardware. Full study, method and negative results in
+  `reports/phase4_backbone_ladder.md`.
 - **Phase 4 — mostly complete.** FastAPI service (alignment server-side,
   liveness/readiness split, coverage in every response), Dockerfile, CI with a
   smoke train, drift monitor, and a Gradio demo with **live sensor ablation**

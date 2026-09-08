@@ -1,0 +1,18 @@
+{
+  "backbone": "tiny",
+  "d_model": 192,
+  "load_in_4bit": false,
+  "backbone_dtype": "auto",
+  "backbone_params": 2075779,
+  "fusion_params": 1584772,
+  "samples": 8,
+  "steps": 300,
+  "batch": 4,
+  "fused_loss": 0.0007766212802380323,
+  "fused_exact": 1.0,
+  "control_loss": 0.02334037981927395,
+  "control_exact": 0.125,
+  "pass": true,
+  "wall_s": 21.6,
+  "peak_vram_gb": 0.17
+}

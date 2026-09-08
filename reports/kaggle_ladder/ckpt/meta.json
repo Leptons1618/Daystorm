@@ -1,0 +1,5 @@
+{
+  "final_loss": 0.02098575048148632,
+  "trainable_params": 1498631,
+  "backbone": "tiny"
+}

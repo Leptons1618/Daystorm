@@ -32,10 +32,15 @@ descending order of importance:
    leakage, not perception. Real numbers require `scripts/precompute_reference.py`
    against actual nuScenes frames and a re-run.
 
-2. **The backbone is a byte-level stand-in, not Qwen2.5-VL.** `TinyBackbone`
-   is ~2 M randomly-initialised parameters with no language prior. `HFBackbone`
-   implements the real path and shares the interface, but has never been run
-   on a GPU. Everything reported here is plumbing validation.
+2. **Every metric below uses a byte-level stand-in, not Qwen2.5-VL.**
+   `TinyBackbone` is ~2 M randomly-initialised parameters with no language
+   prior, and it produced every ablation and latency number in this card.
+   `HFBackbone` — the real path — has now been run on a Tesla T4 across a
+   ladder of six frozen pretrained backbones from 135 M to 3 B, and the Phase 1
+   gate passes on five of them (`reports/phase4_backbone_ladder.md`). That
+   establishes the fusion channel carries sensor information through a real
+   frozen language model. It does **not** re-measure the held-out metrics
+   below, which remain stand-in numbers.
 
 3. **The data is synthetic.** `daystorm.data.synthetic` generates plausible
    kinematics — urban speeds, realistic decelerations, following distances —
@@ -112,7 +117,29 @@ Fusion-stack dtype sweep on the T4 (p50, batch 32): fp16 3.597 ms, fp32
 4.868 ms, nf4 6.271 ms, bf16 **74.149 ms**. `torch.cuda.is_bf16_supported()`
 returns `True` on Turing because it counts emulation; there are no bf16 tensor
 cores, so bf16 runs 20.6x slower than fp16 instead of failing loudly. Full
-table in `reports/phase3_status.md`.
+table in `reports/phase3_status.md`. Reproduced independently on a second T4
+and a different torch build at 19.4x — `reports/phase4_backbone_ladder.md`.
+
+## Frozen-backbone gate
+
+Phase 1's go/no-go gate, run on a T4 with the backbone frozen and only the
+fusion stack trainable. PASS = all eight windows reproduced verbatim from the
+fusion prefix, and not reproduced when that prefix is shuffled across the
+batch.
+
+| backbone | trainable | peak VRAM | fused exact | control exact | gate |
+|---|---|---|---|---|---|
+| SmolLM2-135M-Instruct | 1.45% | 2.61 GB | 1.00 | 0.25 | **PASS** |
+| SmolLM2-360M-Instruct | 0.73% | 4.32 GB | 0.00 | 0.00 | FAIL *(fp16 overflow)* |
+| Qwen2.5-0.5B-Instruct | 0.51% | 6.13 GB | 1.00 | 0.00 | **PASS** |
+| Qwen2.5-1.5B-Instruct | 0.27% | 10.95 GB | 1.00 | 0.00 | **PASS** |
+| Qwen2.5-3B-Instruct (nf4) | 0.20% | 11.81 GB | 1.00 | 0.125 | **PASS** |
+
+This is a deliberate 8-window overfit and says nothing about generalisation.
+It is the necessary condition — if the fusion tokens cannot carry information
+at all, nothing downstream matters — and it is now met through a real frozen
+LM at 135 M parameters. The 360M failure is a numerics artifact, not a
+capacity limit; see the report.
 
 ## Training data
 

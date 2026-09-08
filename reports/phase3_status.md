@@ -78,20 +78,41 @@ scene-identity leakage, not perception — see `MODEL_CARD.md`.
 one. The code is written and the single-GPU baseline is measured (70 ms/step,
 16 windows/step), so the comparison is one working 2-GPU session away.
 
-Routes and their blockers:
+Routes and their blockers, in the order they were tried:
 
 1. **HF Jobs** — `a10g-largex2` is exactly right at $3.00/h, and the CLI works,
    but the account has no pre-paid credits: `402 Pre-paid credit balance is
    insufficient`.
-2. **Kaggle (2x T4, free, 30 h/week)** — kernel pushed and ran, but the worker
-   came up `torch 2.10.0+cpu, devices 0` with no internet. `enable_gpu` and
-   `enable_internet` do not take effect until the account is **phone-verified**.
-   The kernel refused to continue rather than emit a CPU number labelled as
-   distributed.
-3. **Colab** — one GPU per session; cannot produce the comparison at all.
-
-Phone-verifying the Kaggle account is the cheapest unblock: the kernel is
-already pushed and will produce the full comparison in one run.
+2. **Kaggle (2x T4, free, 30 h/week)** — the worker came up `torch
+   2.10.0+cpu, devices 0` with no internet. `enable_gpu` and `enable_internet`
+   do not take effect until the account is **phone-verified**. The kernel
+   refused to continue rather than emit a CPU number labelled as distributed.
+   *Resolved:* account phone-verified.
+3. **Kaggle, second attempt** — ran on the default accelerator, a **Tesla
+   P100**, which is sm_60. Kaggle's own preinstalled torch supports sm_70 and
+   up, so `torch.cuda.is_available()` was `True` and no kernel could launch.
+   Every section failed independently. *Resolved:* accelerator set to
+   `GPU T4 x2`; the kernel now fails fast below sm_70.
+4. **Kaggle, third attempt (`GPU T4 x2`)** — the backbone ladder, latency
+   sweep, end-to-end timing and ONNX export all completed
+   (`reports/phase4_backbone_ladder.md`). The distributed section still emitted
+   no `sb_1gpu` / `sb_ddp` / `sb_fsdp` output directory, and the Kaggle API
+   returns the kernel log as 0 bytes, so the cause is not yet known. A local
+   CPU reproduction of the same `stage_b` invocation against the Kaggle-produced
+   Stage A checkpoint **succeeds** (5 steps, 497 ms/step, LoRA 0.15 M + fusion
+   1.58 M), so this is environment-specific — torchrun or NCCL on the Kaggle
+   worker — and not a bug in `stage_b`. The kernel now mirrors every child
+   process's stdout and stderr into `/kaggle/working/console.log`, which comes
+   back with the outputs, so the next run does not depend on the log endpoint
+   working.
+5. **Kaggle, fourth attempt** — the first run of the mirrored log, and it
+   immediately earned its keep: `kaggle kernels push` **resets the accelerator
+   to the default P100**, so a kernel that ran on `GPU T4 x2` yesterday comes
+   back on sm_60 today with nothing in the CLI to say so. `kernel-metadata.json`
+   can request a GPU but not which one. The sm_70 guard caught it in under a
+   minute and `console.log` recorded the reason. Every push now needs the
+   accelerator set again in the browser before the run means anything.
+6. **Colab** — one GPU per session; cannot produce the comparison at all.
 
 ## Also blocked
 
