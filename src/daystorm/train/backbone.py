@@ -57,22 +57,67 @@ class TinyBackbone(nn.Module):
             torch.tensor(labels, device=device),
         )
 
+    def _step(self, x: torch.Tensor, cache: list) -> tuple[torch.Tensor, list]:
+        """Push new positions through every layer, extending the KV cache.
+
+        Torch's `nn.TransformerEncoderLayer` has no incremental-decode entry
+        point, so this walks the same submodules by hand. The weights are the
+        ones the layer already owns - nothing is re-parameterised, and existing
+        checkpoints load unchanged.
+        """
+        updated = []
+        for layer, (past_k, past_v) in zip(self.body.layers, cache):
+            assert layer.norm_first, "pre-norm block assumed below"
+            attn = layer.self_attn
+            h = layer.norm1(x)
+            q, k, v = F.linear(h, attn.in_proj_weight, attn.in_proj_bias).chunk(3, dim=-1)
+            if past_k is not None:
+                k, v = torch.cat([past_k, k], 1), torch.cat([past_v, v], 1)
+            updated.append((k, v))
+
+            b, t, d = q.shape
+            heads = attn.num_heads
+
+            def split(z):
+                return z.view(b, -1, heads, d // heads).transpose(1, 2)
+
+            # is_causal only when several new positions arrive at once (the
+            # prefill). A single new token attends over the whole cache, which
+            # is exactly the past, so it needs no mask.
+            out = F.scaled_dot_product_attention(
+                split(q), split(k), split(v), is_causal=t > 1
+            )
+            x = x + attn.out_proj(out.transpose(1, 2).reshape(b, t, d))
+            x = x + layer.linear2(layer.activation(layer.linear1(layer.norm2(x))))
+        return x, updated
+
     @torch.no_grad()
     def generate_one(self, prefix: torch.Tensor, question: str, max_new: int = 300) -> str:
-        """Greedy decode a single window. Used by the Phase 1 gate."""
+        """Greedy decode a single window, with a KV cache. Used by the gate.
+
+        The obvious version re-runs the whole stack over the whole sequence for
+        every token - quadratic attention inside a linear loop, and it is where
+        98.4% of the end-to-end latency went in `reports/phase3_status.md`.
+        Caching keys and values means each step attends over the past instead of
+        recomputing it.
+        """
         ids = [BOS] + list(f"Q: {question}\nA: ".encode())
+        tok = torch.tensor([ids], device=prefix.device)
+        x = torch.cat([prefix, self.embed(tok)], dim=1)
+        pos = x.shape[1]
+        x = x + self.pos[:, :pos]
+
+        cache: list = [(None, None)] * len(self.body.layers)
         produced: list[int] = []
         for _ in range(max_new):
-            tok = torch.tensor([ids], device=prefix.device)
-            x = torch.cat([prefix, self.embed(tok)], dim=1)
-            x = x + self.pos[:, : x.shape[1]]
-            n = x.shape[1]
-            causal = torch.triu(torch.ones(n, n, device=x.device, dtype=torch.bool), 1)
-            nxt = int(self.head(self.body(x, mask=causal))[0, -1].argmax())
-            if nxt == EOS:
+            h, cache = self._step(x, cache)
+            nxt = int(self.head(h)[0, -1].argmax())
+            if nxt == EOS or pos >= self.pos.shape[1]:
                 break
-            ids.append(nxt)
             produced.append(nxt)
+            x = self.embed(torch.tensor([[nxt]], device=prefix.device))
+            x = x + self.pos[:, pos : pos + 1]
+            pos += 1
         return bytes(b for b in produced if b < 256).decode("utf-8", "replace")
 
     def forward(self, prefix: torch.Tensor, input_ids: torch.Tensor, labels: torch.Tensor):
@@ -108,7 +153,16 @@ class HFBackbone(nn.Module):
         super().__init__()
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        kwargs: dict = {"device_map": "auto", "attn_implementation": "sdpa"}
+        # One model, one device. `device_map="auto"` spreads a model across every
+        # visible GPU, and this forward assumes a single one: on a 2x T4 worker
+        # it put the 0.5B NF4 embedding table on cuda:1 while `input_ids` were on
+        # cuda:0, and died with "Expected all tensors to be on the same device".
+        # Whether it splits depends on free memory at load time, so the same row
+        # passes alone and fails after a section that left memory held - the
+        # worst kind of intermittent. Pinning is also what the distributed path
+        # wants: one rank owns its local device and nothing else.
+        placement = {"": torch.cuda.current_device()} if torch.cuda.is_available() else None
+        kwargs: dict = {"device_map": placement, "attn_implementation": "sdpa"}
         resolved = {
             "fp16": torch.float16,
             "fp32": torch.float32,
@@ -186,7 +240,35 @@ class HFBackbone(nn.Module):
         return out.loss
 
 
-def build_backbone(name: str, **kw):
+def build_backbone(name: str, device: str | None = None, **kw):
+    """Build a backbone and place it on `device`.
+
+    Placement is the caller-facing reason this helper takes a device at all.
+    HFBackbone is placed by `device_map="auto"` inside `from_pretrained`, and a
+    later `.to(device)` either fights that placement or, for a 4-bit model,
+    raises outright - so the device is honoured for the tiny stand-in and
+    ignored for the real ones. Every call site had been getting that rule
+    slightly wrong on its own.
+    """
     if name in ("tiny", "none"):
-        return TinyBackbone(**kw)
+        kw.pop("load_in_4bit", None)
+        kw.pop("dtype", None)
+        model = TinyBackbone(**kw)
+        return model.to(device) if device else model
     return HFBackbone(name, **kw)
+
+
+def backbone_kwargs(train_args: dict, name: str) -> dict:
+    """Rebuild a backbone the way Stage A built it.
+
+    Stage A stores `vars(args)` in its checkpoint, so quantisation and dtype
+    travel with the weights instead of being retyped on every later command
+    line. Loading an fp16-trained projector against a 4-bit backbone produces
+    numbers rather than an error, which is the failure worth designing out.
+    """
+    if name in ("tiny", "none"):
+        return {}
+    return {
+        "load_in_4bit": bool(train_args.get("load_4bit", False)),
+        "dtype": train_args.get("backbone_dtype", "auto"),
+    }

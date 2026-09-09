@@ -30,22 +30,36 @@ descending order of importance:
    none of the meaning. Worse, it *identifies the scene*, which a model can
    memorise — so the camera and audio ablations measure scene-identity
    leakage, not perception. Real numbers require `scripts/precompute_reference.py`
-   against actual nuScenes frames and a re-run.
+   against actual nuScenes frames and a re-run — which in turn requires the CAN
+   bus expansion, because the labels are derived from CAN (see limitation 3).
 
-2. **Every metric below uses a byte-level stand-in, not Qwen2.5-VL.**
+2. **Most metrics below use a byte-level stand-in, not Qwen2.5-VL.**
    `TinyBackbone` is ~2 M randomly-initialised parameters with no language
-   prior, and it produced every ablation and latency number in this card.
-   `HFBackbone` — the real path — has now been run on a Tesla T4 across a
-   ladder of six frozen pretrained backbones from 135 M to 3 B, and the Phase 1
-   gate passes on five of them (`reports/phase4_backbone_ladder.md`). That
-   establishes the fusion channel carries sensor information through a real
-   frozen language model. It does **not** re-measure the held-out metrics
-   below, which remain stand-in numbers.
+   prior, and it produced every latency number in this card and two of the
+   three ablation tables. `HFBackbone` — the real path — has been run on a
+   Tesla T4 across a ladder of five frozen pretrained backbones from 135 M to
+   3 B (`reports/phase4_backbone_ladder.md`); the Phase 1 gate passes on all of
+   them, and the third ablation table below is a frozen Qwen2.5-0.5B. What is
+   still missing at the real scale is Qwen2.5-VL itself and anything larger
+   than 0.5 B on the held-out split.
+
+   Related: **every held-out number here is Stage A only.** The eval harness
+   scores a Stage A checkpoint, so LoRA is not in any of these tables — Phase
+   2's central claim is trained and checkpointed but not yet measured on
+   held-out data.
 
 3. **The data is synthetic.** `daystorm.data.synthetic` generates plausible
    kinematics — urban speeds, realistic decelerations, following distances —
-   but it is not driving. `daystorm.data.nuscenes_src` implements the real
-   source and is untested against a real download.
+   but it is not driving. `daystorm.data.nuscenes_src` has now been run against
+   a real nuScenes v1.0-mini mount: the devkit installs, the metadata parses,
+   `list_scenes()` returns all ten scenes and camera and radar load. What that
+   mirror does **not** carry is the CAN bus expansion, a separate download most
+   redistributions omit. A scene loads today with the CAN stream empty and
+   masked invalid, and that is more than a missing ablation: `describe_window`
+   derives the question, answer and manoeuvre tag from CAN and radar, so without
+   CAN every real window is discarded before training sees it. The CAN expansion
+   is the prerequisite for real data of any kind here. No metric in this card
+   comes from real data yet.
 
 4. **The audio modality has no real source anywhere.** No public driving
    corpus ships synchronised in-cabin audio. The audio path is a validated
@@ -55,9 +69,10 @@ descending order of importance:
 
 ## Measured results
 
-Held-out split of 16 windows, scene-level partition, byte-level backbone.
-Two independent runs (CPU-trained and T4-trained checkpoints) are reported
-because they disagree in the details and agree on the conclusion.
+Held-out split of 16 windows, scene-level partition. Three independent runs are
+reported — two byte-level checkpoints (CPU- and T4-trained) and one frozen
+Qwen2.5-0.5B — because they disagree in the details and agree on the
+conclusion.
 
 CPU-trained checkpoint:
 
@@ -79,12 +94,27 @@ T4-trained checkpoint (same seeds, same split):
 | no radar | 0.00 | 1.00 | 0.323 (+0.06) | 0.021 |
 | no audio | 0.00 | 1.00 | 0.398 (+0.14) | 0.000 |
 
+Qwen2.5-0.5B-Instruct, frozen, Stage A only (same harness, same split):
+
+| run | exact match | manoeuvre acc | numeric MAE | hallucination |
+|---|---|---|---|---|
+| full | 0.00 | 1.00 | 0.290 | 0.042 |
+| no camera | 0.06 | 1.00 | 0.471 (+0.18) | 0.021 |
+| **no CAN** | 0.00 | 1.00 | **1.079 (+0.79)** | **0.250 (+0.21)** |
+| no radar | 0.00 | 1.00 | 3.460 (+3.17) | 0.091 |
+| no audio | 0.00 | 1.00 | 3.826 (+3.54) | 0.140 |
+
 Reading these honestly:
 
-- **CAN is doing the work, in both runs.** It is the only ablation that makes
-  the model *fabricate*: hallucination 0%→21% (CPU) and 2%→21% (T4), with the
-  largest numeric-error increase in both. That is the result the architecture
-  predicts, and it reproduces across two independently trained checkpoints.
+- **CAN is doing the work, in all three runs.** It is the ablation that makes
+  the model *fabricate*: hallucination 0%→21% (CPU), 2%→21% (T4) and 4%→25% on
+  a frozen 0.5 B pretrained backbone. Three checkpoints, two of which share no
+  weights, no vocabulary and no architecture, agree.
+- **A real backbone is not more accurate here** (MAE 0.290 against 0.260) and
+  degrades much harder when a sensor drops (+3.2 radar, +3.5 audio). With
+  content-free camera and audio embeddings, the bigger model appears to lean on
+  scene identity harder — which is an argument for real embeddings, not a
+  finding about perception. n=16 and numeric MAE is unbounded.
 - **Camera's contribution is not stable** across runs (−0.02 on CPU, +0.11 on
   T4). Expected: its embeddings are meaningless by construction, so whatever
   the model extracts is scene identity, and how much it leans on that varies
@@ -110,15 +140,18 @@ Single window, byte-level backbone, Tesla T4 (sm_75) and CPU:
 
 Decode is the only sequential stage and dominates completely. The GPU improves
 it by 2%, because at this model size decode is bound by per-token kernel launch
-latency rather than compute — so the next optimisation is batched decode or a
-KV cache with CUDA graphs, not more GPU.
+latency rather than compute. Adding a KV cache to the byte-level decode — an
+O(n³) → O(n²) change — bought only 1.18x (219.2 → 185.7 ms on the same 102
+tokens), which is the same finding from the other direction: the next
+optimisation is CUDA graphs or batched decode — attacking launches, not FLOPs —
+and not more GPU.
 
 Fusion-stack dtype sweep on the T4 (p50, batch 32): fp16 3.597 ms, fp32
 4.868 ms, nf4 6.271 ms, bf16 **74.149 ms**. `torch.cuda.is_bf16_supported()`
 returns `True` on Turing because it counts emulation; there are no bf16 tensor
 cores, so bf16 runs 20.6x slower than fp16 instead of failing loudly. Full
 table in `reports/phase3_status.md`. Reproduced independently on a second T4
-and a different torch build at 19.4x — `reports/phase4_backbone_ladder.md`.
+and a different torch build at 19.2x — `reports/phase4_backbone_ladder.md`.
 
 ## Frozen-backbone gate
 
@@ -129,17 +162,21 @@ batch.
 
 | backbone | trainable | peak VRAM | fused exact | control exact | gate |
 |---|---|---|---|---|---|
-| SmolLM2-135M-Instruct | 1.45% | 2.61 GB | 1.00 | 0.25 | **PASS** |
-| SmolLM2-360M-Instruct | 0.73% | 4.32 GB | 0.00 | 0.00 | FAIL *(fp16 overflow)* |
+| SmolLM2-135M-Instruct | 1.45% | 2.61 GB | 1.00 | 0.125 | **PASS** |
+| SmolLM2-360M-Instruct *(fp16)* | 0.73% | 4.32 GB | 0.00 | 0.25 | FAIL *(fp16 overflow)* |
+| SmolLM2-360M-Instruct *(fp32)* | 0.73% | 6.07 GB | 1.00 | 0.125 | **PASS** |
 | Qwen2.5-0.5B-Instruct | 0.51% | 6.13 GB | 1.00 | 0.00 | **PASS** |
 | Qwen2.5-1.5B-Instruct | 0.27% | 10.95 GB | 1.00 | 0.00 | **PASS** |
 | Qwen2.5-3B-Instruct (nf4) | 0.20% | 11.81 GB | 1.00 | 0.125 | **PASS** |
+| facebook/opt-125m | 1.55% | 1.80 GB | 1.00 | 0.125 | **PASS** |
+| Qwen2.5-0.5B-Instruct *(nf4)* | 0.51% | 5.58 GB | 1.00 | 0.125 | **PASS** |
 
 This is a deliberate 8-window overfit and says nothing about generalisation.
 It is the necessary condition — if the fusion tokens cannot carry information
 at all, nothing downstream matters — and it is now met through a real frozen
-LM at 135 M parameters. The 360M failure is a numerics artifact, not a
-capacity limit; see the report.
+LM at 125 M parameters, across three model families, including one that was
+never instruction-tuned. The 360M failure is a numerics artifact, not a
+capacity limit: the same model in fp32 passes at 1.00 exact. See the report.
 
 ## Training data
 

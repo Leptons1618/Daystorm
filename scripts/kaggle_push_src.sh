@@ -19,6 +19,19 @@ mkdir -p "${STAGE}/src"
 cp -r src/daystorm "${STAGE}/src/daystorm"
 find "${STAGE}" -name __pycache__ -type d -prune -exec rm -rf {} +
 
+# Ship a Stage A checkpoint alongside the code. Stage B needs one to start, and
+# without this the distributed sections have to re-train Stage A on the GPU
+# first - 15 MB here against ~15 minutes of GPU time on every run that only
+# wants throughput numbers. Which checkpoint hardly matters: those sections
+# measure ms/step, not quality.
+CKPT="${CKPT:-ckpt/stage_a}"
+if [ -f "${CKPT}/fusion.pt" ]; then
+  mkdir -p "${STAGE}/ckpt"
+  cp "${CKPT}"/*.pt "${CKPT}"/*.json "${STAGE}/ckpt/"
+else
+  echo "warning: no ${CKPT}/fusion.pt - the kernel will have to train Stage A itself"
+fi
+
 # `kaggle datasets metadata` writes the fields nested under "info", which
 # `kaggle datasets version` then rejects with "ID or slug must be specified in
 # the metadata". Declaring the two fields it actually reads is shorter than

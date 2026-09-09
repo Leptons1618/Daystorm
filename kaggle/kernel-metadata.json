@@ -8,8 +8,10 @@
   "enable_gpu": true,
   "enable_internet": true,
   "dataset_sources": [
-    "nullpointeranish/daystorm-src"
+    "nullpointeranish/daystorm-src",
+    "aadimator/nuscenes-mini"
   ],
+  "machine_shape": "NvidiaTeslaT4",
   "competition_sources": [],
   "kernel_sources": []
 }

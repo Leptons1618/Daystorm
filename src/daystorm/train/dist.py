@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import timedelta
 
 import torch
 
@@ -50,8 +51,14 @@ def init_distributed() -> DistInfo:
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ.get("LOCAL_RANK", rank))
     world = int(os.environ["WORLD_SIZE"])
+    # NCCL's default collective timeout is 10 minutes. A rank divergence - one
+    # rank inside a collective the other never joins - costs exactly that before
+    # anything is printed, and the run is dead either way. Two minutes is still
+    # orders of magnitude above any collective in this model and turns a
+    # deadlock into a fast, legible failure.
+    timeout = timedelta(seconds=int(os.environ.get("DAYSTORM_DIST_TIMEOUT_S", "120")))
     backend = "nccl" if torch.cuda.is_available() else "gloo"
-    dist.init_process_group(backend=backend, rank=rank, world_size=world)
+    dist.init_process_group(backend=backend, rank=rank, world_size=world, timeout=timeout)
     if torch.cuda.is_available():
         torch.cuda.set_device(local_rank)
     return DistInfo(rank=rank, local_rank=local_rank, world_size=world, enabled=True)
@@ -65,7 +72,8 @@ def shutdown(info: DistInfo) -> None:
         dist.destroy_process_group()
 
 
-def wrap(module: torch.nn.Module, info: DistInfo, strategy: str = "fsdp") -> torch.nn.Module:
+def wrap(module: torch.nn.Module, info: DistInfo, strategy: str = "fsdp",
+         precision: str = "fp16") -> torch.nn.Module:
     """Wrap for data-parallel or fully-sharded training.
 
     ``ddp`` replicates parameters and all-reduces gradients: right for the
@@ -88,13 +96,21 @@ def wrap(module: torch.nn.Module, info: DistInfo, strategy: str = "fsdp") -> tor
     from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
 
     # T4 is Turing: fp16, never bf16.
-    precision = MixedPrecision(
-        param_dtype=torch.float16, reduce_dtype=torch.float32, buffer_dtype=torch.float16
-    )
+    #
+    # `precision` exists so FSDP-vs-DDP can be read as a statement about
+    # sharding. DDP here has no mixed precision, so an FSDP wrapped in fp16 is
+    # two changes at once, and the first measured comparison duly showed FSDP
+    # *faster* than DDP on a model far too small to benefit from sharding - a
+    # dtype result wearing a sharding label.
+    mixed = None
+    if precision == "fp16":
+        mixed = MixedPrecision(
+            param_dtype=torch.float16, reduce_dtype=torch.float32, buffer_dtype=torch.float16
+        )
     return FSDP(
         module,
         sharding_strategy=ShardingStrategy.FULL_SHARD,
-        mixed_precision=precision,
+        mixed_precision=mixed,
         device_id=info.local_rank if torch.cuda.is_available() else None,
         use_orig_params=True,  # required for per-parameter-group learning rates
     )

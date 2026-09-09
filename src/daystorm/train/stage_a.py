@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from pathlib import Path
 
@@ -186,6 +187,7 @@ def main() -> int:
         )
         started, last = time.time(), float("nan")
         tag = "control" if shuffle_prefix else "fused  "
+        skipped = nonfinite = 0
 
         for step in range(1, args.steps + 1):
             idx = rng.choice(len(train), size=min(args.batch, len(train)), replace=False)
@@ -206,10 +208,26 @@ def main() -> int:
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(params, 1.0)
+            prev_scale = scaler.get_scale()
             scaler.step(opt)
             scaler.update()
             sched.step()
             last = float(loss.item())
+
+            # GradScaler halves the scale and *skips* the optimizer step on any
+            # non-finite gradient. A few of those at the start is the scale
+            # calibrating; a long unbroken run of them means every forward is
+            # overflowing, the weights are not moving, and the loss sits flat or
+            # goes NaN with nothing in the output to say why. Diagnosing that
+            # from the outside cost a CPU activation probe and a confirming GPU
+            # run - see reports/phase4_backbone_ladder.md, result 2.
+            skipped = skipped + 1 if scaler.get_scale() < prev_scale else 0
+            nonfinite = nonfinite + 1 if not math.isfinite(last) else 0
+            if 25 in (skipped, nonfinite):
+                print(f"  [{tag}] WARNING: 25 consecutive steps with "
+                      f"{'skipped updates' if skipped else 'a non-finite loss'}. "
+                      f"This backbone is overflowing fp16 in its residual stream; "
+                      f"re-run with --backbone-dtype fp32.", flush=True)
 
             if step % max(args.steps // 8, 1) == 0 or step == 1:
                 print(f"  [{tag}] step {step:>5}/{args.steps}  loss {last:.4f}  "

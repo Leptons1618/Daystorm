@@ -1,0 +1,47 @@
+{
+  "full": {
+    "n": 16.0,
+    "exact_match": 0.0,
+    "manoeuvre_accuracy": 1.0,
+    "numeric_mae": 0.2895833333333337,
+    "hallucination_rate": 0.041666666666666664,
+    "numbers_per_answer": 3.0,
+    "coverage_honesty": 0.0
+  },
+  "no_camera": {
+    "n": 16.0,
+    "exact_match": 0.0625,
+    "manoeuvre_accuracy": 1.0,
+    "numeric_mae": 0.4708333333333335,
+    "hallucination_rate": 0.020833333333333332,
+    "numbers_per_answer": 3.0,
+    "coverage_honesty": 0.0
+  },
+  "no_can": {
+    "n": 16.0,
+    "exact_match": 0.0,
+    "manoeuvre_accuracy": 1.0,
+    "numeric_mae": 1.079166666666667,
+    "hallucination_rate": 0.25,
+    "numbers_per_answer": 3.0,
+    "coverage_honesty": 0.0
+  },
+  "no_radar": {
+    "n": 16.0,
+    "exact_match": 0.0,
+    "manoeuvre_accuracy": 1.0,
+    "numeric_mae": 3.4604651162790705,
+    "hallucination_rate": 0.09090909090909091,
+    "numbers_per_answer": 2.75,
+    "coverage_honesty": 0.0
+  },
+  "no_audio": {
+    "n": 16.0,
+    "exact_match": 0.0,
+    "manoeuvre_accuracy": 1.0,
+    "numeric_mae": 3.8256410256410254,
+    "hallucination_rate": 0.13953488372093023,
+    "numbers_per_answer": 2.6875,
+    "coverage_honesty": 0.0
+  }
+}

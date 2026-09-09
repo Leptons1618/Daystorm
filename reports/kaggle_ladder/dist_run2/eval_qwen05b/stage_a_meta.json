@@ -1,0 +1,5 @@
+{
+  "final_loss": 0.02733435109257698,
+  "trainable_params": 1498631,
+  "backbone": "Qwen/Qwen2.5-0.5B-Instruct"
+}

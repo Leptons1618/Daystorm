@@ -24,7 +24,7 @@ from daystorm.data.tensors import FEATURE_DIMS, HashCache, NpzCache, collate
 from daystorm.data.windows import Sample, build_samples, split_by_scene
 from daystorm.eval.metrics import Prediction, evaluate, numbers_in
 from daystorm.model.fusion import DaystormFusion
-from daystorm.train.backbone import build_backbone
+from daystorm.train.backbone import backbone_kwargs, build_backbone
 
 __all__ = ["ablate", "failure_gallery", "predict"]
 
@@ -128,7 +128,8 @@ def _fmt(results: dict) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ckpt", default="ckpt/stage_a")
-    ap.add_argument("--backbone", default="tiny")
+    ap.add_argument("--backbone", default="",
+                    help="defaults to the backbone the checkpoint was trained with")
     ap.add_argument("--scenes", type=int, default=40)
     ap.add_argument("--max-eval", type=int, default=16)
     ap.add_argument("--max-new", type=int, default=220)
@@ -156,7 +157,13 @@ def main() -> int:
             "  at scripts/precompute_reference.py output before quoting any number.\n"
         )
 
-    backbone = build_backbone(args.backbone).to(args.device)
+    # Same backbone, same quantisation, same dtype as Stage A - read from the
+    # checkpoint rather than retyped, because a mismatch here changes every
+    # number below without raising anything.
+    args.backbone = args.backbone or blob.get("args", {}).get("backbone", "tiny")
+    backbone = build_backbone(
+        args.backbone, device=args.device, **backbone_kwargs(blob.get("args", {}), args.backbone)
+    )
     if blob.get("backbone") is not None:
         backbone.load_state_dict(blob["backbone"])
     backbone.eval()

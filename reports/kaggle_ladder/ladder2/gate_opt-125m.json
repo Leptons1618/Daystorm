@@ -1,0 +1,18 @@
+{
+  "backbone": "facebook/opt-125m",
+  "d_model": 768,
+  "load_in_4bit": false,
+  "backbone_dtype": "auto",
+  "backbone_params": 163848192,
+  "fusion_params": 2286340,
+  "samples": 8,
+  "steps": 300,
+  "batch": 4,
+  "fused_loss": 0.007414713501930237,
+  "fused_exact": 1.0,
+  "control_loss": 0.13346734642982483,
+  "control_exact": 0.25,
+  "pass": true,
+  "wall_s": 54.3,
+  "peak_vram_gb": 1.66
+}

@@ -26,13 +26,21 @@ from daystorm.data.synthetic import make_scene
 from daystorm.data.tensors import FEATURE_DIMS, HashCache, NpzCache, collate
 from daystorm.data.windows import build_samples, split_by_scene
 from daystorm.model.fusion import DaystormFusion
-from daystorm.train.backbone import build_backbone
+from daystorm.train.backbone import backbone_kwargs, build_backbone
 from daystorm.train.dist import all_reduce_mean, init_distributed, shutdown, wrap
 
 # Attention and MLP projections. The names differ per architecture; the byte
 # level stand-in exposes torch's own TransformerEncoderLayer submodules.
+#
+# `out_proj` is deliberately absent from the tiny row. It exists on
+# nn.MultiheadAttention, but MHA never *calls* it as a module - it hands
+# out_proj.weight and out_proj.bias to F.multi_head_attention_forward - so a
+# LoRA adapter wrapped around it is never in the graph and never receives a
+# gradient. Single-GPU training does not notice; DDP does, and refuses to start
+# with "Parameter indices which did not receive grad". They were dead weights,
+# not a lost capability.
 LORA_TARGETS = {
-    "tiny": ["out_proj", "linear1", "linear2"],
+    "tiny": ["linear1", "linear2"],
     "default": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
 }
 
@@ -54,7 +62,8 @@ def attach_lora(backbone, name: str, rank: int, alpha: int, dropout: float):
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--backbone", default="tiny")
+    p.add_argument("--backbone", default="",
+                   help="defaults to the backbone the Stage A checkpoint was trained with")
     p.add_argument("--stage-a", default="ckpt/stage_a", help="checkpoint to start from")
     p.add_argument("--scenes", type=int, default=40)
     p.add_argument("--steps", type=int, default=600)
@@ -72,6 +81,9 @@ def main() -> int:
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--shard", choices=("none", "ddp", "fsdp"), default="none",
                    help="multi-GPU strategy; launch with torchrun --nproc_per_node=N")
+    p.add_argument("--dist-precision", choices=("fp16", "fp32"), default="fp16",
+                   help="FSDP parameter dtype. fp32 makes FSDP comparable to DDP, "
+                        "which has no mixed precision here")
     args = p.parse_args()
 
     info = init_distributed()
@@ -87,7 +99,12 @@ def main() -> int:
     stats = NormStats.load(stage_a / "norm.json")  # train-split stats travel with the model
     cache = NpzCache(args.cache, FEATURE_DIMS) if args.cache else HashCache(FEATURE_DIMS)
 
-    backbone = build_backbone(args.backbone).to(args.device)
+    # The backbone Stage A used, unless overridden: mixing a Stage A projector
+    # with a differently quantised backbone is silent, not an error.
+    args.backbone = args.backbone or blob.get("args", {}).get("backbone", "tiny")
+    backbone = build_backbone(
+        args.backbone, device=args.device, **backbone_kwargs(blob.get("args", {}), args.backbone)
+    )
     if blob.get("backbone") is not None:
         backbone.load_state_dict(blob["backbone"])
     d_model = backbone.d_model
@@ -99,8 +116,6 @@ def main() -> int:
     n_lora = sum(p.numel() for p in backbone.parameters() if p.requires_grad)
     n_fusion = sum(p.numel() for p in fusion.parameters() if p.requires_grad)
     n_frozen = sum(p.numel() for p in backbone.parameters() if not p.requires_grad)
-    if not info.is_main:
-        pass
     print(
         f"[rank {info.rank}/{info.world_size}] "
         f"train {len(train)} / val {len(val)} | backbone {args.backbone} d_model={d_model}\n"
@@ -122,8 +137,12 @@ def main() -> int:
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    # Bind before wrapping: DDP does not forward attribute lookups to the module
+    # it wraps, so a post-wrap backbone.tokenize() raises AttributeError on both
+    # ranks. FSDP happens to forward them, which is why only the DDP run died.
+    tokenize = backbone.tokenize
     if args.shard != "none":
-        backbone = wrap(backbone, info, args.shard)
+        backbone = wrap(backbone, info, args.shard, args.dist_precision)
         fusion = wrap(fusion, info, "ddp")  # 6 M params: replicate, do not shard
 
     rng = np.random.default_rng(args.seed + info.rank)
@@ -137,7 +156,7 @@ def main() -> int:
             batch = collate([train[i] for i in idx], cache, stats)
             feats = {k: torch.from_numpy(v).to(args.device) for k, v in batch["features"].items()}
             mask = torch.from_numpy(batch["mask"]).to(args.device)
-            ids, labels = backbone.tokenize(batch["questions"], batch["answers"], args.device)
+            ids, labels = tokenize(batch["questions"], batch["answers"], args.device)
             loss = backbone(fusion(feats, mask), ids, labels) / args.accum
             loss.backward()
             total += float(loss.item()) * args.accum
@@ -153,11 +172,11 @@ def main() -> int:
             per_step = (time.time() - started) / step
             print(f"  step {step:>5}/{args.steps}  loss {total:.4f}  "
                   f"{per_step * 1000:.0f} ms/step  {time.time() - started:.0f}s")
-        if step % args.ckpt_every == 0 and info.is_main:
-            _save(out, fusion, backbone, stats, args, history)
+        if step % args.ckpt_every == 0:
+            _save(out, fusion, backbone, stats, args, history, info)
 
+    _save(out, fusion, backbone, stats, args, history, info)
     if info.is_main:
-        _save(out, fusion, backbone, stats, args, history)
         elapsed = time.time() - started
         print(f"\nsaved LoRA adapters + fusion stack to {out}")
         print(f"world_size={info.world_size}  {args.steps} steps in {elapsed:.0f}s  "
@@ -167,13 +186,40 @@ def main() -> int:
     return 0
 
 
-def _save(out: Path, fusion, backbone, stats: NormStats, args, history: list[float]) -> None:
-    """Checkpoint everything trainable. Base weights are never written."""
+def _full_state_dict(module):
+    """Gather one unsharded state dict, with keys matching the single-GPU run.
+
+    Under FSDP this is a **collective** - every rank has to call it. Guarding the
+    whole save with `if info.is_main` left rank 0 alone in an allgather while
+    rank 1 walked on to the next step, and the NCCL watchdog took the job down
+    600 s later. Unwrapping DDP matters for a different reason: its `module.`
+    key prefix would make the checkpoint unloadable by the single-GPU path.
+    """
+    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+    if isinstance(module, FSDP):
+        from torch.distributed.fsdp import FullStateDictConfig, StateDictType
+
+        cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        with FSDP.state_dict_type(module, StateDictType.FULL_STATE_DICT, cfg):
+            return module.state_dict()
+    return getattr(module, "module", module).state_dict()
+
+
+def _save(out: Path, fusion, backbone, stats: NormStats, args, history: list[float], info) -> None:
+    """Checkpoint everything trainable. Base weights are never written.
+
+    Called by every rank - see `_full_state_dict` - but only rank 0 writes.
+    """
+    fusion_sd = _full_state_dict(fusion)
+    backbone_sd = _full_state_dict(backbone)
+    if not info.is_main:
+        return
     torch.save(
         {
-            "fusion": fusion.state_dict(),
-            "lora": {k: v for k, v in backbone.state_dict().items() if "lora_" in k},
-            "backbone": backbone.state_dict() if args.backbone in ("tiny", "none") else None,
+            "fusion": fusion_sd,
+            "lora": {k: v for k, v in backbone_sd.items() if "lora_" in k},
+            "backbone": backbone_sd if args.backbone in ("tiny", "none") else None,
             "args": vars(args),
         },
         out / "stage_b.pt",

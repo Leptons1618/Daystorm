@@ -66,7 +66,6 @@ def load_scene(
 
     root = Path(dataroot or os.environ.get("DAYSTORM_NUSCENES", "data/raw"))
     nusc = NuScenes(version=version, dataroot=str(root), verbose=False)
-    can = NuScenesCanBus(dataroot=str(root))
 
     scene = next(s for s in nusc.scene if s["name"] == scene_name)
     first = nusc.get("sample", scene["first_sample_token"])
@@ -74,7 +73,26 @@ def load_scene(
 
     cam_t, cam_paths = _sample_data_series(nusc, scene, camera, t_ref)
     radar_t, radar_v = _radar_series(nusc, scene, t_ref)
-    can_t, can_v = _can_series(can, scene_name, t_ref)
+
+    # The CAN bus is a separate download from the main nuScenes archive, and
+    # most redistributions omit it - the Kaggle nuScenes-mini mirror has
+    # samples, sweeps and maps but no can_bus/, which used to make every scene
+    # here unloadable. A missing sensor is a first-class input in this pipeline:
+    # an empty stream resamples to a zero-coverage window that the fusion mask
+    # marks invalid, exactly as a dead bus would. So this degrades rather than
+    # refuses - loudly, because the ablations say CAN is the modality whose
+    # absence makes the model fabricate.
+    try:
+        can_t, can_v = _can_series(NuScenesCanBus(dataroot=str(root)), scene_name, t_ref)
+    except Exception as exc:  # noqa: BLE001 - the devkit raises bare Exception here
+        print(f"[nuscenes] CAN bus unavailable: {exc}")
+        print("[nuscenes] Loading with the CAN stream empty, so every window is")
+        print("[nuscenes] can-coverage 0. Camera and radar are unaffected. Do not")
+        print("[nuscenes] quote a CAN ablation, or any grounding metric, from this.")
+        # 9 columns, matching FEATURE_DIMS["can"] and _can_series' own no-data
+        # return. Imported as a literal to keep this module's dependency on
+        # `.align` and `.synthetic` alone.
+        can_t, can_v = np.zeros(0), np.zeros((0, 9), dtype=np.float32)
 
     duration = float(scene["nbr_samples"]) * 0.5  # keyframes are 2 Hz
     streams = {

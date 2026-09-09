@@ -1,0 +1,18 @@
+{
+  "backbone": "HuggingFaceTB/SmolLM2-135M-Instruct",
+  "d_model": 576,
+  "load_in_4bit": false,
+  "backbone_dtype": "auto",
+  "backbone_params": 134515008,
+  "fusion_params": 1978756,
+  "samples": 8,
+  "steps": 300,
+  "batch": 4,
+  "fused_loss": 0.0057749077677726746,
+  "fused_exact": 1.0,
+  "control_loss": 0.11283686757087708,
+  "control_exact": 0.125,
+  "pass": true,
+  "wall_s": 143.3,
+  "peak_vram_gb": 2.61
+}

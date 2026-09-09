@@ -148,12 +148,38 @@ End-to-end, one window:
 | decode | 233.73 ms | 228.93 ms | 98.5% |
 
 **The GPU barely helps** — 2% on decode — because the backbone is small enough
-to be bound by per-token kernel launch latency, not compute. Batched decode or
-a KV cache with CUDA graphs will move that number; a bigger GPU will not.
+to be bound by per-token kernel launch latency, not compute.
+
+That diagnosis now has a direct experiment behind it. `generate_one` used to
+re-run the whole transformer over the whole sequence for every token; giving it
+a KV cache took decode from 219.2 ms to **185.7 ms** on the same 102 output
+tokens — **1.18x**, from an asymptotic O(n³) → O(n²) improvement. One decode
+step is far too small to saturate a T4, so removing arithmetic from a
+launch-bound loop returns almost nothing. What is left to attack is launches:
+CUDA graphs or batched decode. Detail in `reports/phase4_backbone_ladder.md`.
 
 Training on T4: Stage A 700 steps in 38 s (CPU: 139 s, 3.7x); Stage B QLoRA
 70 ms/step at 16 windows/step; the Phase 1 gate passes with a cleaner control
 than on CPU (100% exact fused vs **0%** shuffled).
+
+### Two GPUs: what sharding actually buys
+
+Stage B, 300 steps, batch 16 per rank, Kaggle 2x T4:
+
+| config | ms/step | windows/step | windows/s | vs 1 GPU |
+|---|---|---|---|---|
+| 1 GPU | 63 | 16 | 254 | 1.00x |
+| DDP (fp32) | 67 | 32 | 478 | **1.88x** |
+| FSDP (fp32) | 68 | 32 | 471 | **1.85x** |
+| FSDP (fp16) | 48 | 32 | 667 | **2.63x** |
+
+**Sharding costs 1.5% here and buys memory this model does not need**, which is
+what FSDP is supposed to do to a 2 M parameter model. The 1.40x on the last row
+is fp16, not sharding — and finding that out took an fp32 FSDP row, because the
+first version of this table showed FSDP at 2.42x and *superlinear scaling on two
+GPUs is a bug report, not a result*. `dist.py` was applying mixed precision to
+the FSDP path only. All three two-GPU runs finish within 0.0006 loss of each
+other, so the fp16 win costs nothing measurable here.
 
 ### How small can the frozen backbone get?
 
@@ -163,23 +189,42 @@ trains, so scale is the only variable that moves.
 
 | backbone | trainable | peak VRAM | fused exact | control exact | gate |
 |---|---|---|---|---|---|
-| SmolLM2-135M-Instruct | 1.45% | 2.61 GB | **1.00** | 0.25 | **PASS** |
-| SmolLM2-360M-Instruct | 0.73% | 4.32 GB | 0.00 | 0.00 | FAIL *(fp16 overflow)* |
+| SmolLM2-135M-Instruct | 1.45% | 2.61 GB | **1.00** | 0.125 | **PASS** |
+| SmolLM2-360M-Instruct *(fp16)* | 0.73% | 4.32 GB | 0.00 | 0.25 | FAIL *(fp16 overflow)* |
+| SmolLM2-360M-Instruct *(fp32)* | 0.73% | 6.07 GB | **1.00** | 0.125 | **PASS** |
 | Qwen2.5-0.5B-Instruct | 0.51% | 6.13 GB | **1.00** | 0.00 | **PASS** |
 | Qwen2.5-1.5B-Instruct | 0.27% | 10.95 GB | **1.00** | 0.00 | **PASS** |
 | Qwen2.5-3B-Instruct (nf4) | 0.20% | 11.81 GB | **1.00** | 0.125 | **PASS** |
+| facebook/opt-125m | 1.55% | 1.80 GB | **1.00** | 0.125 | **PASS** |
+| Qwen2.5-0.5B-Instruct *(nf4)* | 0.51% | 5.58 GB | **1.00** | 0.125 | **PASS** |
 
-**The idea does not need scale.** A 135 M frozen instruct model reproduces all
-eight answers verbatim from 16 fusion tokens, and fails to when those tokens
-are shuffled across the batch. The one failure is arithmetic, not capacity:
-SmolLM2-360M is the only backbone whose residual stream reaches the fp16
-ceiling of 65504 (2 of 20 probed forward passes exceed it; the models either
-side of it peak at 0.41x and 0.01x), so `GradScaler` skips every step and the
-loss never leaves its starting value.
+**The idea does not need scale — or instruction tuning.** A 135 M frozen
+instruct model reproduces all eight answers verbatim from 16 fusion tokens, and
+fails to when those tokens are shuffled across the batch. So does
+`facebook/opt-125m`, from a third family, never instruction-tuned, at 1.66 GB
+peak and 54 s of training. What the gate exercises is a pretrained causal
+decoder reading a learned prefix, not scale and not instruction-following.
+
+The one failure in the table is arithmetic, not capacity, and
+that is now confirmed rather than inferred: SmolLM2-360M is the only backbone
+whose residual stream reaches the fp16 ceiling of 65504 (2 of 20 probed forward
+passes exceed it; the models either side of it peak at 0.41x and 0.01x), so
+`GradScaler` skips every step and the loss goes NaN. The same model, same data,
+same 300 steps in fp32 passes at 1.00 exact — for 1.4x the VRAM and 1.7x the
+wall clock.
 
 The binding constraint is VRAM, not compute — gradients reach the projectors
 *through* the frozen decoder, so every layer's activations are kept for the
-backward pass even though no weight in it updates.
+backward pass even though no weight in it updates. That is also why **NF4 is
+not worth it below 3 B**: running 0.5 B quantised against the same model in
+fp16 costs **2.2x the wall clock to save 9% of peak VRAM** (218 s / 6.13 GB →
+471 s / 5.58 GB) and changes nothing about the verdict. Weights are not what
+fills the card; retained activations are.
+
+The whole ladder ran a second time unchanged and **all seven verdicts
+reproduce**, with `fused_exact` identical in every row and peak VRAM identical
+to 0.01 GB. Control exact is noisy at n=8 (one row moved 0.00 → 0.375 between
+runs, still far under the 0.50 threshold) and should be read as an estimate.
 
 ## Status
 
@@ -199,23 +244,41 @@ backward pass even though no weight in it updates.
   digits only exist in the sensors.
 - **Phase 2 — complete.** Stage B QLoRA (two learning rates, adapters only),
   the grounding metrics above, per-modality ablation, failure gallery.
-- **Phase 3 — measured on a T4**, except the 2-GPU comparison. Quantization and
+- **Phase 3 — complete, measured on a T4.** Quantization and
   dtype sweep, `torch.compile`, end-to-end latency, and ONNX export (verified to
-  7.15e-07 across four cases including a fully-masked batch). The FSDP-vs-DDP
-  run still has not produced a number: it now has two GPUs (Kaggle `GPU T4 x2`,
-  account verified) and the distributed section emitted no output on that run,
-  with a 0-byte kernel log. Local reproduction of the same command succeeds, so
-  the cause is environment-specific — trail in `reports/phase3_status.md`.
-- **Backbone ladder — complete.** Six frozen pretrained backbones from 135 M to
-  3 B run through the Phase 1 gate on a T4; five pass, including the smallest
-  real one. Latency, end-to-end timing and ONNX export reproduced on second
-  hardware. Full study, method and negative results in
-  `reports/phase4_backbone_ladder.md`.
+  7.15e-07 across four cases including a fully-masked batch). **The 2-GPU
+  comparison is measured** — table above — after eight attempts and five root
+  causes: a torchao/PEFT import that killed Stage B before it started, an
+  attribute DDP does not forward, an FSDP collective inside a rank-0 checkpoint
+  guard (a 600 s NCCL watchdog deadlock), a LoRA adapter on
+  `nn.MultiheadAttention.out_proj` that had never received a gradient in any
+  run, and mixed precision applied to only one arm of the comparison. Full trail
+  in `reports/phase3_status.md`.
+- **Held-out metrics now exist for a real frozen backbone.** Qwen2.5-0.5B, and
+  the CAN-bus hallucination result reproduces on it: 4% → 25% with the CAN bus
+  removed, against 2% → 21% for the byte-level stand-in. Two models sharing no
+  weights or architecture agree on which missing sensor makes this one
+  fabricate.
+- **Backbone ladder — complete, and replicated.** Six frozen pretrained
+  backbones from 125 M to 3 B across three families run through the Phase 1
+  gate on a T4; every one passes, including `opt-125m`, which is not
+  instruction-tuned. The single failure in the table is a dtype, not a model,
+  and the same model passes in fp32. The whole sweep ran a second time unchanged
+  and **all seven verdicts reproduce**. Latency, end-to-end timing and ONNX
+  export reproduced on second hardware. Full study, method, inferences, next
+  steps and negative results in `reports/phase4_backbone_ladder.md`.
 - **Phase 4 — mostly complete.** FastAPI service (alignment server-side,
   liveness/readiness split, coverage in every response), Dockerfile, CI with a
   smoke train, drift monitor, and a Gradio demo with **live sensor ablation**
   (`space/app.py`, runs locally). Deploying it needs HF PRO — see
   `space/DEPLOY.md`. No demo recording yet.
+- **Real data — one download away, and it is the CAN bus.**
+  `daystorm.data.nuscenes_src` now loads scenes off a real nuScenes v1.0-mini
+  mount; camera frames, radar and metadata are all there. The CAN bus expansion
+  is not, on any public mirror found — and `describe_window` derives the
+  question, answer and manoeuvre tag *from* CAN, so without it every real window
+  is dropped before a camera embedding is ever used. The CAN expansion is the
+  prerequisite for real data, not an enhancement to it.
 - Full plan: `daystorm-plan.html`.
 
 MIT licensed. Data: nuScenes (CC BY-NC-SA 4.0) is not redistributed here.

@@ -72,13 +72,54 @@ Removing the CAN bus is still the only ablation that makes the model
 *fabricate*: hallucination 2% → 21%. Camera and audio rows remain
 scene-identity leakage, not perception — see `MODEL_CARD.md`.
 
-## Still blocked
+## The same harness on a real frozen backbone
 
-**The 2-GPU FSDP vs DDP comparison.** It needs two GPUs and free Colab gives
-one. The code is written and the single-GPU baseline is measured (70 ms/step,
-16 windows/step), so the comparison is one working 2-GPU session away.
+Qwen2.5-0.5B-Instruct, frozen, Stage A 600 steps (final loss 0.0273), 16
+held-out windows:
 
-Routes and their blockers, in the order they were tried:
+| run | exact | manoeuvre | numeric MAE | hallucination |
+|---|---|---|---|---|
+| full | 0.000 | 1.000 | 0.290 | 0.042 |
+| no camera | 0.062 | 1.000 | 0.471 (+0.18) | 0.021 |
+| **no CAN** | 0.000 | 1.000 | 1.079 (+0.79) | **0.250 (+0.21)** |
+| no radar | 0.000 | 1.000 | 3.460 (+3.17) | 0.091 |
+| no audio | 0.000 | 1.000 | 3.826 (+3.54) | 0.140 |
+
+**The CAN-bus finding reproduces across an entirely different backbone**:
+hallucination 4% → 25% here, 2% → 21% above. Two models sharing no weights, no
+vocabulary and no architecture agree on which missing sensor makes this model
+fabricate.
+
+Two honest caveats. The real backbone is *not* more accurate on the full input
+(MAE 0.290 against 0.260), and it degrades far more sharply when a sensor drops
+(+3.2 and +3.5 MAE for radar and audio). With `HashCache` the camera and audio
+vectors are scene identity, so the larger model appears to lean on that identity
+harder — an argument for real embeddings, not against real backbones. n=16 and
+numeric MAE is unbounded, so single predictions move it a long way.
+
+## The 2-GPU comparison — measured, after eight attempts
+
+Stage B, `TinyBackbone`, 300 steps, batch 16 per rank, Kaggle 2x T4:
+
+| config | ms/step | windows/step | windows/s | vs 1 GPU | final loss |
+|---|---|---|---|---|---|
+| 1 GPU | 63 | 16 | 254 | 1.00x | 0.0982 |
+| DDP (fp32) | 67 | 32 | 478 | **1.88x** | 0.0847 |
+| FSDP (fp32) | 68 | 32 | 471 | **1.85x** | 0.0847 |
+| FSDP (fp16) | 48 | 32 | 667 | **2.63x** | 0.0853 |
+
+**Sharding costs 1.5% and buys memory nothing here needs** — the predicted
+result, now measured. **fp16 buys 1.40x** and costs no accuracy: the three
+two-GPU runs finish within 0.0006 of each other.
+
+The first version of this table had two rows, DDP at 1.88x and FSDP at 2.42x,
+and 2.42x on two GPUs is superlinear. `dist.py` was wrapping FSDP in
+`MixedPrecision(param_dtype=fp16)` while DDP got no mixed precision at all, so
+"FSDP beats DDP" was a dtype result wearing a sharding label. `--dist-precision`
+separates them. A result too good for what it claims to measure is a bug report.
+
+Getting here took eight attempts. The blockers, in the order they were hit,
+because most of them are environment traps rather than code:
 
 1. **HF Jobs** — `a10g-largex2` is exactly right at $3.00/h, and the CLI works,
    but the account has no pre-paid credits: `402 Pre-paid credit balance is
@@ -97,11 +138,11 @@ Routes and their blockers, in the order they were tried:
    sweep, end-to-end timing and ONNX export all completed
    (`reports/phase4_backbone_ladder.md`). The distributed section still emitted
    no `sb_1gpu` / `sb_ddp` / `sb_fsdp` output directory, and the Kaggle API
-   returns the kernel log as 0 bytes, so the cause is not yet known. A local
+   returns the kernel log as 0 bytes, so the cause was invisible. A local
    CPU reproduction of the same `stage_b` invocation against the Kaggle-produced
    Stage A checkpoint **succeeds** (5 steps, 497 ms/step, LoRA 0.15 M + fusion
-   1.58 M), so this is environment-specific — torchrun or NCCL on the Kaggle
-   worker — and not a bug in `stage_b`. The kernel now mirrors every child
+   1.58 M), which correctly ruled out a bug in `stage_b` but pointed at torchrun
+   and NCCL, and both were innocent — see 6. The kernel now mirrors every child
    process's stdout and stderr into `/kaggle/working/console.log`, which comes
    back with the outputs, so the next run does not depend on the log endpoint
    working.
@@ -112,7 +153,89 @@ Routes and their blockers, in the order they were tried:
    can request a GPU but not which one. The sm_70 guard caught it in under a
    minute and `console.log` recorded the reason. Every push now needs the
    accelerator set again in the browser before the run means anything.
-6. **Colab** — one GPU per session; cannot produce the comparison at all.
+6. **Kaggle, fifth attempt (`GPU T4 x2`, complete run)** — everything except the
+   distributed section finished, and the mirrored log finally named the cause.
+   One line, identical in the single-GPU baseline and in both distributed runs:
+
+   ```
+   ImportError: Found an incompatible version of torchao.
+   Found version 0.10.0, but only versions above 0.16.0 are supported
+   ```
+
+   Kaggle's image ships torchao 0.10.0. PEFT's LoRA dispatcher calls
+   `is_torchao_available()` unconditionally, and that function **raises** on a
+   too-old torchao rather than returning `False`, so `get_peft_model()` dies in
+   `stage_b.attach_lora` before a single step runs. Nothing in this project uses
+   torchao. Both distributed runs had already spawned two ranks and initialised
+   the process group, so torchrun and NCCL were never the problem. The kernel now
+   runs `pip uninstall -y torchao` before anything else — upgrading it instead
+   would drag torch along behind it.
+7. **Kaggle, sixth attempt (`GPU T4 x2`, kernel v11)** — the torchao fix worked
+   and Stage B started for the first time, which exposed three bugs the import
+   error had been hiding. The **single-GPU baseline is now measured on a T4: 300
+   steps in 19 s, 64 ms/step at 16 windows/step.** Then:
+
+   - **DDP**, step 1: `AttributeError: 'DistributedDataParallel' object has no
+     attribute 'tokenize'`. `stage_b` called `backbone.tokenize(...)` after
+     wrapping; DDP does not forward attribute lookups to the wrapped module,
+     FSDP does. *Fixed* — bind `tokenize` before the wrap.
+   - **FSDP**, step 200: NCCL watchdog timeout after 600 s, rank 0 in
+     `_ALLGATHER_BASE` and rank 1 in `BROADCAST` at the same sequence number.
+     `if step % args.ckpt_every == 0 and info.is_main: _save(...)` put a
+     *collective* — FSDP `state_dict()` — inside a rank-0 guard, so rank 0
+     waited for a gather rank 1 was never going to join. *Fixed* — every rank
+     calls `_save` under `FullStateDictConfig(rank0_only=True)`, only rank 0
+     writes.
+   - **Dead LoRA adapters**, reported by DDP: `Parameter indices which did not
+     receive grad for rank 0: 0 1 6 7 12 13 18 19` — the `out_proj` adapter in
+     each of the four layers. `nn.MultiheadAttention` passes `out_proj.weight`
+     into `F.multi_head_attention_forward` rather than calling the module, so
+     LoRA there is never in the graph. Every Stage B run in this repo's history
+     carried 0.03 M parameters that could not receive a gradient. *Fixed* —
+     `out_proj` removed from `LORA_TARGETS["tiny"]`, trainable 0.15 M → 0.12 M.
+
+   The DDP path and the all-rank checkpoint are verified on a local 2-rank gloo
+   run (6 steps, `--ckpt-every 3`, CPU): both ranks finish, both checkpoints
+   write, no hang. The FSDP branch cannot be verified locally — `RuntimeError:
+   FSDP needs a non-CPU accelerator device` — so it rests on the API contract
+   until the next GPU run.
+8. **Kaggle, seventh attempt — the comparison ran.** `smoke` passed first
+   (20 steps on all three paths, ~1 min), `smoke_fsdp/stage_b.pt` proving the
+   FSDP gather works on a GPU, and `dist` produced the table at the top of this
+   section. `"machine_shape": "NvidiaTeslaT4"` held the accelerator across the
+   push, so no browser step was needed. Elapsed: about five minutes, against
+   ~70 for every previous attempt.
+9. **Colab** — one GPU per session; cannot produce the comparison at all.
+
+## How the kernel is run now
+
+Four of the six attempts above spent ~70 minutes re-measuring work that was
+already published in order to reach the three minutes that were actually
+broken — and then failed there, so the next attempt paid the 70 minutes again.
+The kernel is now a menu of independent sections rather than a pipeline:
+
+```bash
+scripts/kaggle_push_src.sh            # code + a Stage A checkpoint
+scripts/kaggle_run.sh --only dist     # ~5 min, not ~70
+scripts/kaggle_run.sh --only all      # the whole thing, when that is the point
+```
+
+Four changes make that safe:
+
+- **`"machine_shape": "NvidiaTeslaT4"`** in `kernel-metadata.json` pins the
+  accelerator across pushes. `enable_gpu` alone silently resets to the sm_60
+  P100 on every push, which is the trap in item 5.
+- **The Stage A checkpoint ships in the source dataset.** `dist` needed
+  `stagea` to have run first, which is why a throughput measurement was paying
+  for a training run. 15 MB in the dataset against ~15 min of GPU time per run.
+- **A `smoke` section runs first**: 20 steps of every distributed path with
+  `--ckpt-every 10`, so a mid-run checkpoint actually happens. All three bugs in
+  item 7 surface there in about a minute, and the queue stops if it fails
+  rather than measuring a broken build.
+- **`DAYSTORM_DIST_TIMEOUT_S`, default 120.** NCCL's default collective timeout
+  is 10 minutes, so the FSDP deadlock cost 10 minutes of a session before
+  printing anything. The run is dead either way; 2 minutes is still orders of
+  magnitude above any collective in this model.
 
 ## Also blocked
 

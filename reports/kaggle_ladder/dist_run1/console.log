@@ -1,0 +1,216 @@
+found package at /kaggle/input/datasets/nullpointeranish/daystorm-src/src
+
+==========================================================================
+hardware
+==========================================================================
+torch 2.10.0+cu128  cuda 12.8  devices 2
+  [0] Tesla T4  15.6 GB  sm_75
+  [1] Tesla T4  15.6 GB  sm_75
+bf16 supported: True
+stage A checkpoint: /kaggle/input/datasets/nullpointeranish/daystorm-src/ckpt
+sections: smoke dist
+
+### section 1/2: smoke
+
+==========================================================================
+smoke: 20-step distributed dry run (fails fast, before anything costly)
+==========================================================================
+$ /usr/bin/python3 -m daystorm.train.stage_b --backbone tiny --steps 20 --batch 4 --scenes 12 --ckpt-every 10 --stage-a /kaggle/input/datasets/nullpointeranish/daystorm-src/ckpt --shard none --out /kaggle/working/smoke_1gpu
+/kaggle/working/daystorm/src/daystorm/train/backbone.py:41: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.body = nn.TransformerEncoder(layer, layers)
+[rank 0/1] train 180 / val 36 | backbone tiny d_model=192
+trainable: LoRA 0.12 M + fusion 1.58 M | frozen backbone 2.1 M (45.1% trainable)
+  step     1/20  loss 0.0249  1536 ms/step  2s
+  step     2/20  loss 0.0655  785 ms/step  2s
+  step     4/20  loss 0.0659  410 ms/step  2s
+  step     6/20  loss 0.0546  285 ms/step  2s
+  step     8/20  loss 0.0492  221 ms/step  2s
+  step    10/20  loss 0.0447  182 ms/step  2s
+  step    12/20  loss 0.0626  159 ms/step  2s
+  step    14/20  loss 0.0467  140 ms/step  2s
+  step    16/20  loss 0.1036  127 ms/step  2s
+  step    18/20  loss 0.0944  116 ms/step  2s
+  step    20/20  loss 0.0647  108 ms/step  2s
+
+saved LoRA adapters + fusion stack to /kaggle/working/smoke_1gpu
+world_size=1  20 steps in 2s  (112 ms/step, 4 windows/step)
+$ /usr/bin/python3 -m torch.distributed.run --nproc_per_node=2 --standalone -m daystorm.train.stage_b --backbone tiny --steps 20 --batch 4 --scenes 12 --ckpt-every 10 --stage-a /kaggle/input/datasets/nullpointeranish/daystorm-src/ckpt --shard ddp --out /kaggle/working/smoke_ddp
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+[W909 07:33:16.452752034 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+[W909 07:33:18.496480857 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+[W909 07:33:18.508845112 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+/kaggle/working/daystorm/src/daystorm/train/backbone.py:41: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.body = nn.TransformerEncoder(layer, layers)
+/kaggle/working/daystorm/src/daystorm/train/backbone.py:41: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.body = nn.TransformerEncoder(layer, layers)
+[rank 0/2] train 180 / val 36 | backbone tiny d_model=192
+trainable: LoRA 0.12 M + fusion 1.58 M | frozen backbone 2.1 M (45.1% trainable)
+[rank 1/2] train 180 / val 36 | backbone tiny d_model=192
+trainable: LoRA 0.12 M + fusion 1.58 M | frozen backbone 2.1 M (45.1% trainable)
+  step     1/20  loss 0.0341  678 ms/step  1s
+  step     2/20  loss 0.0892  360 ms/step  1s
+  step     4/20  loss 0.0492  202 ms/step  1s
+  step     6/20  loss 0.0695  148 ms/step  1s
+  step     8/20  loss 0.0388  121 ms/step  1s
+  step    10/20  loss 0.0385  104 ms/step  1s
+  step    12/20  loss 0.0878  95 ms/step  1s
+  step    14/20  loss 0.0553  87 ms/step  1s
+  step    16/20  loss 0.0820  80 ms/step  1s
+  step    18/20  loss 0.0596  75 ms/step  1s
+  step    20/20  loss 0.0576  71 ms/step  1s
+
+saved LoRA adapters + fusion stack to /kaggle/working/smoke_ddp
+world_size=2  20 steps in 2s  (75 ms/step, 8 windows/step)
+/usr/local/lib/python3.12/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+$ /usr/bin/python3 -m torch.distributed.run --nproc_per_node=2 --standalone -m daystorm.train.stage_b --backbone tiny --steps 20 --batch 4 --scenes 12 --ckpt-every 10 --stage-a /kaggle/input/datasets/nullpointeranish/daystorm-src/ckpt --shard fsdp --out /kaggle/working/smoke_fsdp
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+[W909 07:33:34.099072841 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+[W909 07:33:36.100229509 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+[W909 07:33:36.141597533 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+/kaggle/working/daystorm/src/daystorm/train/backbone.py:41: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.body = nn.TransformerEncoder(layer, layers)
+/kaggle/working/daystorm/src/daystorm/train/backbone.py:41: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.body = nn.TransformerEncoder(layer, layers)
+[rank 0/2] train 180 / val 36 | backbone tiny d_model=192
+trainable: LoRA 0.12 M + fusion 1.58 M | frozen backbone 2.1 M (45.1% trainable)
+[rank 1/2] train 180 / val 36 | backbone tiny d_model=192
+trainable: LoRA 0.12 M + fusion 1.58 M | frozen backbone 2.1 M (45.1% trainable)
+  step     1/20  loss 0.0416  845 ms/step  1s
+  step     2/20  loss 0.0864  444 ms/step  1s
+  step     4/20  loss 0.0559  242 ms/step  1s
+  step     6/20  loss 0.0682  175 ms/step  1s
+  step     8/20  loss 0.0427  142 ms/step  1s
+  step    10/20  loss 0.0523  122 ms/step  1s
+/usr/local/lib/python3.12/dist-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:822: FutureWarning: FSDP.state_dict_type() and FSDP.set_state_dict_type() are being deprecated. Please use APIs, get_state_dict() and set_state_dict(), which can support different parallelisms, FSDP1, FSDP2, DDP. API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html#torch.distributed.checkpoint.state_dict.get_state_dict .Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .
+  prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
+/usr/local/lib/python3.12/dist-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:822: FutureWarning: FSDP.state_dict_type() and FSDP.set_state_dict_type() are being deprecated. Please use APIs, get_state_dict() and set_state_dict(), which can support different parallelisms, FSDP1, FSDP2, DDP. API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html#torch.distributed.checkpoint.state_dict.get_state_dict .Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .
+  prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
+/usr/local/lib/python3.12/dist-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:829: FutureWarning: FSDP.state_dict_type() and FSDP.set_state_dict_type() are being deprecated. Please use APIs, get_state_dict() and set_state_dict(), which can support different parallelisms, FSDP1, FSDP2, DDP. API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html#torch.distributed.checkpoint.state_dict.get_state_dict .Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .
+  FullyShardedDataParallel.set_state_dict_type(
+/usr/local/lib/python3.12/dist-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:829: FutureWarning: FSDP.state_dict_type() and FSDP.set_state_dict_type() are being deprecated. Please use APIs, get_state_dict() and set_state_dict(), which can support different parallelisms, FSDP1, FSDP2, DDP. API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html#torch.distributed.checkpoint.state_dict.get_state_dict .Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .
+  FullyShardedDataParallel.set_state_dict_type(
+  step    12/20  loss 0.0889  113 ms/step  1s
+  step    14/20  loss 0.0521  104 ms/step  1s
+  step    16/20  loss 0.0883  97 ms/step  2s
+  step    18/20  loss 0.0644  91 ms/step  2s
+  step    20/20  loss 0.0598  87 ms/step  2s
+
+saved LoRA adapters + fusion stack to /kaggle/working/smoke_fsdp
+world_size=2  20 steps in 2s  (92 ms/step, 8 windows/step)
+/usr/local/lib/python3.12/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+smoke: PASS
+
+### section 2/2: dist
+
+==========================================================================
+distributed Stage B: 1 GPU vs DDP vs FSDP
+==========================================================================
+>>> single-GPU baseline
+$ /usr/bin/python3 -m daystorm.train.stage_b --backbone tiny --steps 300 --batch 16 --scenes 60 --ckpt-every 301 --stage-a /kaggle/input/datasets/nullpointeranish/daystorm-src/ckpt --shard none --out /kaggle/working/sb_1gpu
+/kaggle/working/daystorm/src/daystorm/train/backbone.py:41: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.body = nn.TransformerEncoder(layer, layers)
+[rank 0/1] train 864 / val 216 | backbone tiny d_model=192
+trainable: LoRA 0.12 M + fusion 1.58 M | frozen backbone 2.1 M (45.1% trainable)
+  step     1/300  loss 0.0707  757 ms/step  1s
+  step    30/300  loss 0.0481  88 ms/step  3s
+  step    60/300  loss 0.0650  75 ms/step  4s
+  step    90/300  loss 0.1092  70 ms/step  6s
+  step   120/300  loss 0.0755  68 ms/step  8s
+  step   150/300  loss 0.0725  67 ms/step  10s
+  step   180/300  loss 0.0680  66 ms/step  12s
+  step   210/300  loss 0.1051  65 ms/step  14s
+  step   240/300  loss 0.0777  65 ms/step  16s
+  step   270/300  loss 0.0629  64 ms/step  17s
+  step   300/300  loss 0.0979  64 ms/step  19s
+
+saved LoRA adapters + fusion stack to /kaggle/working/sb_1gpu
+world_size=1  300 steps in 19s  (64 ms/step, 16 windows/step)
+
+>>> 2 GPU, DDP
+$ /usr/bin/python3 -m torch.distributed.run --nproc_per_node=2 --standalone -m daystorm.train.stage_b --backbone tiny --steps 300 --batch 16 --scenes 60 --ckpt-every 301 --stage-a /kaggle/input/datasets/nullpointeranish/daystorm-src/ckpt --shard ddp --out /kaggle/working/sb_ddp
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+[W909 07:34:23.857184010 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+[W909 07:34:25.910341999 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+[W909 07:34:25.926412577 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+/kaggle/working/daystorm/src/daystorm/train/backbone.py:41: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.body = nn.TransformerEncoder(layer, layers)
+/kaggle/working/daystorm/src/daystorm/train/backbone.py:41: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.body = nn.TransformerEncoder(layer, layers)
+[rank 1/2] train 864 / val 216 | backbone tiny d_model=192
+trainable: LoRA 0.12 M + fusion 1.58 M | frozen backbone 2.1 M (45.1% trainable)
+[rank 0/2] train 864 / val 216 | backbone tiny d_model=192
+trainable: LoRA 0.12 M + fusion 1.58 M | frozen backbone 2.1 M (45.1% trainable)
+  step     1/300  loss 0.0741  749 ms/step  1s
+  step    30/300  loss 0.0524  91 ms/step  3s
+  step    60/300  loss 0.0702  78 ms/step  5s
+  step    90/300  loss 0.0817  73 ms/step  7s
+  step   120/300  loss 0.0615  71 ms/step  9s
+  step   150/300  loss 0.0729  70 ms/step  11s
+  step   180/300  loss 0.0598  69 ms/step  12s
+  step   210/300  loss 0.0864  69 ms/step  14s
+  step   240/300  loss 0.0654  68 ms/step  16s
+  step   270/300  loss 0.0582  68 ms/step  18s
+  step   300/300  loss 0.0854  67 ms/step  20s
+
+saved LoRA adapters + fusion stack to /kaggle/working/sb_ddp
+world_size=2  300 steps in 20s  (68 ms/step, 32 windows/step)
+/usr/local/lib/python3.12/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+
+>>> 2 GPU, FSDP
+$ /usr/bin/python3 -m torch.distributed.run --nproc_per_node=2 --standalone -m daystorm.train.stage_b --backbone tiny --steps 300 --batch 16 --scenes 60 --ckpt-every 301 --stage-a /kaggle/input/datasets/nullpointeranish/daystorm-src/ckpt --shard fsdp --out /kaggle/working/sb_fsdp
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+[W909 07:34:59.146505532 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+[W909 07:35:01.167571801 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+[W909 07:35:01.185270792 socket.cpp:207] [c10d] The hostname of the client socket cannot be retrieved. err=-3
+/kaggle/working/daystorm/src/daystorm/train/backbone.py:41: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.body = nn.TransformerEncoder(layer, layers)
+/kaggle/working/daystorm/src/daystorm/train/backbone.py:41: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.body = nn.TransformerEncoder(layer, layers)
+[rank 1/2] train 864 / val 216 | backbone tiny d_model=192
+trainable: LoRA 0.12 M + fusion 1.58 M | frozen backbone 2.1 M (45.1% trainable)
+[rank 0/2] train 864 / val 216 | backbone tiny d_model=192
+trainable: LoRA 0.12 M + fusion 1.58 M | frozen backbone 2.1 M (45.1% trainable)
+  step     1/300  loss 0.0725  893 ms/step  1s
+  step    30/300  loss 0.0501  81 ms/step  2s
+  step    60/300  loss 0.0713  66 ms/step  4s
+  step    90/300  loss 0.0836  60 ms/step  5s
+  step   120/300  loss 0.0603  58 ms/step  7s
+  step   150/300  loss 0.0729  56 ms/step  8s
+  step   180/300  loss 0.0602  55 ms/step  10s
+  step   210/300  loss 0.0855  54 ms/step  11s
+  step   240/300  loss 0.0666  54 ms/step  13s
+  step   270/300  loss 0.0581  53 ms/step  14s
+  step   300/300  loss 0.0848  53 ms/step  16s
+/usr/local/lib/python3.12/dist-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:822: FutureWarning: FSDP.state_dict_type() and FSDP.set_state_dict_type() are being deprecated. Please use APIs, get_state_dict() and set_state_dict(), which can support different parallelisms, FSDP1, FSDP2, DDP. API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html#torch.distributed.checkpoint.state_dict.get_state_dict .Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .
+  prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
+/usr/local/lib/python3.12/dist-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:822: FutureWarning: FSDP.state_dict_type() and FSDP.set_state_dict_type() are being deprecated. Please use APIs, get_state_dict() and set_state_dict(), which can support different parallelisms, FSDP1, FSDP2, DDP. API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html#torch.distributed.checkpoint.state_dict.get_state_dict .Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .
+  prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
+/usr/local/lib/python3.12/dist-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:829: FutureWarning: FSDP.state_dict_type() and FSDP.set_state_dict_type() are being deprecated. Please use APIs, get_state_dict() and set_state_dict(), which can support different parallelisms, FSDP1, FSDP2, DDP. API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html#torch.distributed.checkpoint.state_dict.get_state_dict .Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .
+  FullyShardedDataParallel.set_state_dict_type(
+/usr/local/lib/python3.12/dist-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:829: FutureWarning: FSDP.state_dict_type() and FSDP.set_state_dict_type() are being deprecated. Please use APIs, get_state_dict() and set_state_dict(), which can support different parallelisms, FSDP1, FSDP2, DDP. API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html#torch.distributed.checkpoint.state_dict.get_state_dict .Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .
+  FullyShardedDataParallel.set_state_dict_type(
+
+saved LoRA adapters + fusion stack to /kaggle/working/sb_fsdp
+world_size=2  300 steps in 16s  (53 ms/step, 32 windows/step)
+/usr/local/lib/python3.12/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+
+Read ms/step against windows/step: both distributed runs process 2x the
+windows per step, so equal ms/step is a 2x throughput win. FSDP is expected
+to LOSE to DDP on a model this small - it trades throughput for memory it
+does not need here - and reporting that is the point of running both.

@@ -1,0 +1,87 @@
+{
+  "device": "Tesla T4",
+  "torch": "2.10.0+cu128",
+  "d_model": 2048,
+  "runs": {
+    "fp32": {
+      "batch1": {
+        "p50_ms": 1.587,
+        "p95_ms": 1.677,
+        "p99_ms": 1.729,
+        "mean_ms": 1.596,
+        "n": 60,
+        "batch": 1,
+        "per_window_ms": 1.587
+      },
+      "batch8": {
+        "p50_ms": 2.133,
+        "p95_ms": 2.378,
+        "p99_ms": 2.391,
+        "mean_ms": 2.13,
+        "n": 60,
+        "batch": 8,
+        "per_window_ms": 0.267
+      }
+    },
+    "fp16": {
+      "batch1": {
+        "p50_ms": 1.571,
+        "p95_ms": 1.726,
+        "p99_ms": 1.771,
+        "mean_ms": 1.591,
+        "n": 60,
+        "batch": 1,
+        "per_window_ms": 1.571
+      },
+      "batch8": {
+        "p50_ms": 1.705,
+        "p95_ms": 1.845,
+        "p99_ms": 1.919,
+        "mean_ms": 1.723,
+        "n": 60,
+        "batch": 8,
+        "per_window_ms": 0.213
+      }
+    },
+    "bf16": {
+      "batch1": {
+        "p50_ms": 5.872,
+        "p95_ms": 6.202,
+        "p99_ms": 6.45,
+        "mean_ms": 5.922,
+        "n": 60,
+        "batch": 1,
+        "per_window_ms": 5.872
+      },
+      "batch8": {
+        "p50_ms": 19.296,
+        "p95_ms": 20.494,
+        "p99_ms": 23.693,
+        "mean_ms": 19.527,
+        "n": 60,
+        "batch": 8,
+        "per_window_ms": 2.412
+      }
+    },
+    "nf4": {
+      "batch1": {
+        "p50_ms": 6.06,
+        "p95_ms": 6.623,
+        "p99_ms": 6.638,
+        "mean_ms": 6.107,
+        "n": 60,
+        "batch": 1,
+        "per_window_ms": 6.06
+      },
+      "batch8": {
+        "p50_ms": 5.638,
+        "p95_ms": 5.99,
+        "p99_ms": 6.055,
+        "mean_ms": 5.705,
+        "n": 60,
+        "batch": 8,
+        "per_window_ms": 0.705
+      }
+    }
+  }
+}
