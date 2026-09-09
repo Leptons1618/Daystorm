@@ -131,7 +131,7 @@ def main() -> int:
     ap.add_argument("--batch", type=int, nargs="+", default=[1, 8])
     ap.add_argument("--iters", type=int, default=60)
     ap.add_argument("--compile", action="store_true", help="also measure torch.compile")
-    ap.add_argument("--out", default="reports/latency.json")
+    ap.add_argument("--out", default="reports/local/latency.json")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
 

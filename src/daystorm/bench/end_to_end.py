@@ -34,7 +34,7 @@ def main() -> int:
     ap.add_argument("--backbone", default="tiny")
     ap.add_argument("--iters", type=int, default=10)
     ap.add_argument("--max-new", type=int, default=200)
-    ap.add_argument("--out", default="reports/end_to_end.json")
+    ap.add_argument("--out", default="reports/local/end_to_end.json")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
 

@@ -21,6 +21,16 @@ __all__ = ["HFBackbone", "TinyBackbone", "build_backbone"]
 PAD, BOS, EOS, VOCAB = 256, 257, 258, 259
 
 
+def _heads(z: torch.Tensor, heads: int) -> torch.Tensor:
+    """(b, t, d) -> (b, heads, t, d/heads).
+
+    Split by each tensor's own shape: once a KV cache exists, q carries the new
+    positions and k/v carry the whole past, so they disagree on t.
+    """
+    b, t, d = z.shape
+    return z.view(b, t, heads, d // heads).transpose(1, 2)
+
+
 def encode(text: str, max_len: int) -> list[int]:
     ids = [BOS] + list(text.encode("utf-8"))[: max_len - 2] + [EOS]
     return ids + [PAD] * (max_len - len(ids))
@@ -78,14 +88,11 @@ class TinyBackbone(nn.Module):
             b, t, d = q.shape
             heads = attn.num_heads
 
-            def split(z):
-                return z.view(b, -1, heads, d // heads).transpose(1, 2)
-
             # is_causal only when several new positions arrive at once (the
             # prefill). A single new token attends over the whole cache, which
             # is exactly the past, so it needs no mask.
             out = F.scaled_dot_product_attention(
-                split(q), split(k), split(v), is_causal=t > 1
+                _heads(q, heads), _heads(k, heads), _heads(v, heads), is_causal=t > 1
             )
             x = x + attn.out_proj(out.transpose(1, 2).reshape(b, t, d))
             x = x + layer.linear2(layer.activation(layer.linear1(layer.norm2(x))))
@@ -97,7 +104,7 @@ class TinyBackbone(nn.Module):
 
         The obvious version re-runs the whole stack over the whole sequence for
         every token - quadratic attention inside a linear loop, and it is where
-        98.4% of the end-to-end latency went in `reports/phase3_status.md`.
+        98.4% of the end-to-end latency went in `docs/benchmarks.md`.
         Caching keys and values means each step attends over the past instead of
         recomputing it.
         """
@@ -188,7 +195,7 @@ class HFBackbone(nn.Module):
             # activations within a factor of two of the fp16 ceiling of 65504 - a
             # forward pass then produces inf, every gradient is non-finite, and the
             # loss sits flat while GradScaler skips every step. SmolLM2-360M peaks
-            # at 60694 on this path; see reports/phase4_backbone_ladder.md.
+            # at 60694 on this path; see docs/findings.md.
             kwargs["dtype"] = resolved
         self.tok = AutoTokenizer.from_pretrained(model_id)
         if self.tok.pad_token is None:

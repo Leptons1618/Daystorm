@@ -8,4 +8,4 @@ the ones read out of it, not a re-run.
 
 The pre-cache comparison is in `../run11/console.log` (decode p50 219.22 ms,
 465 char/s) against this run's 185.74 ms and 549 char/s — the same 102 output
-tokens in both. Analysis in `reports/phase4_backbone_ladder.md`, result 10.
+tokens in both. Analysis in `docs/findings.md`, result 10.

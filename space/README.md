@@ -22,4 +22,4 @@ whole point of the architecture, and it is the thing a static demo cannot show.
 
 Read the limitations before believing any number: this checkpoint uses a
 byte-level stand-in backbone and content-free camera/audio embeddings. The CAN
-and radar paths are real. See `MODEL_CARD.md` in the repo.
+and radar paths are real. See `docs/model_card.md` in the repo.

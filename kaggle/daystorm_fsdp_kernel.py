@@ -51,7 +51,7 @@ SWEEP = [
     # The fp16 row above fails with a NaN loss, twice, reproducibly. Its residual
     # stream peaks near the fp16 ceiling of 65504, so one inf makes GradScaler
     # skip every step. fp32 is the control that separates "overflowed" from
-    # "too small to learn this" - see reports/phase4_backbone_ladder.md.
+    # "too small to learn this" - see docs/findings.md.
     ("HuggingFaceTB/SmolLM2-360M-Instruct", False, "fp32", "SmolLM2-360M-Instruct-fp32"),
     ("Qwen/Qwen2.5-0.5B-Instruct", False, "auto", "Qwen2.5-0.5B-Instruct"),
     ("Qwen/Qwen2.5-1.5B-Instruct", False, "auto", "Qwen2.5-1.5B-Instruct"),

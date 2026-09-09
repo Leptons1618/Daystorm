@@ -45,7 +45,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ckpt", default="", help="optional stage_a checkpoint to export")
     ap.add_argument("--d-model", type=int, default=2048)
-    ap.add_argument("--out", default="reports/daystorm_fusion.onnx")
+    ap.add_argument("--out", default="reports/local/daystorm_fusion.onnx")
     ap.add_argument("--opset", type=int, default=17)
     ap.add_argument("--tolerance", type=float, default=1e-4)
     args = ap.parse_args()

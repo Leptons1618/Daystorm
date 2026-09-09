@@ -1,4 +1,4 @@
-# Phase 3 — measured on a Tesla T4
+# GPU benchmarks — measured on a Tesla T4
 
 Hardware: Tesla T4, sm_75, 15.6 GB, CUDA 12.8, torch 2.11.0+cu128, via
 `colab new -s daystorm --gpu T4`. T4 is deliberate: the README makes claims
@@ -70,7 +70,7 @@ with CUDA graphs, will move this number and a bigger GPU will not.
 
 Removing the CAN bus is still the only ablation that makes the model
 *fabricate*: hallucination 2% → 21%. Camera and audio rows remain
-scene-identity leakage, not perception — see `MODEL_CARD.md`.
+scene-identity leakage, not perception — see `docs/model_card.md`.
 
 ## The same harness on a real frozen backbone
 
@@ -136,7 +136,7 @@ because most of them are environment traps rather than code:
    `GPU T4 x2`; the kernel now fails fast below sm_70.
 4. **Kaggle, third attempt (`GPU T4 x2`)** — the backbone ladder, latency
    sweep, end-to-end timing and ONNX export all completed
-   (`reports/phase4_backbone_ladder.md`). The distributed section still emitted
+   (`docs/findings.md`). The distributed section still emitted
    no `sb_1gpu` / `sb_ddp` / `sb_fsdp` output directory, and the Kaggle API
    returns the kernel log as 0 bytes, so the cause was invisible. A local
    CPU reproduction of the same `stage_b` invocation against the Kaggle-produced

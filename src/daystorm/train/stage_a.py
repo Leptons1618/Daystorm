@@ -220,7 +220,7 @@ def main() -> int:
             # overflowing, the weights are not moving, and the loss sits flat or
             # goes NaN with nothing in the output to say why. Diagnosing that
             # from the outside cost a CPU activation probe and a confirming GPU
-            # run - see reports/phase4_backbone_ladder.md, result 2.
+            # run - see docs/findings.md, result 2.
             skipped = skipped + 1 if scaler.get_scale() < prev_scale else 0
             nonfinite = nonfinite + 1 if not math.isfinite(last) else 0
             if 25 in (skipped, nonfinite):

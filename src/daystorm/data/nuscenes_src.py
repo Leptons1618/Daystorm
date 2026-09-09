@@ -101,7 +101,7 @@ def load_scene(
         "radar": Stream(radar_t, radar_v, "radar"),
         # No public driving corpus ships synchronised in-cabin audio; the audio
         # stream is attached separately by scripts/synthesise_audio.py and is
-        # declared as synthetic in MODEL_CARD.md.
+        # declared as synthetic in docs/model_card.md.
         "audio": Stream.empty(1, "audio"),
     }
     out = Scene(streams, event="unknown", event_t=0.0, duration_s=duration, seed=0)

@@ -2,7 +2,7 @@
 
 Hardware: Kaggle `GPU T4 x2`, 2x Tesla T4 (sm_75, 15.6 GB), CUDA 12.8, torch
 2.10.0+cu128. Kernel `kaggle/daystorm_fsdp_kernel.py`. Raw outputs, including
-the full console transcript, in `reports/kaggle_ladder/`.
+the full console transcript, in `reports/kaggle/`.
 
 ## The question
 
@@ -78,7 +78,7 @@ Three things worth reading carefully:
 ### Replication
 
 The whole ladder ran a second time, unchanged, in a later kernel (v11,
-`reports/kaggle_ladder/run11/`). **All seven verdicts reproduce.** `fused_exact`
+`reports/kaggle/run11/`). **All seven verdicts reproduce.** `fused_exact`
 is identical in every row — 1.00 everywhere, 0.00 for SmolLM2-360M in fp16 — and
 peak VRAM is identical to the 0.01 GB. What moves is loss and the control:
 
@@ -374,7 +374,7 @@ affordable to replace. Stage A, 600 steps, backbone frozen, final loss 0.0273;
 | no radar | 0.000 | 1.000 | 3.460 (+3.17) | 0.091 |
 | no audio | 0.000 | 1.000 | 3.826 (+3.54) | 0.140 |
 
-Against the `TinyBackbone` run of the same harness (`reports/phase3_status.md`),
+Against the `TinyBackbone` run of the same harness (`docs/benchmarks.md`),
 three things stand out:
 
 - **The CAN-bus result reproduces across an entirely different backbone.**
@@ -568,7 +568,7 @@ Not established:
 
 - **Anything about perception.** These runs use the same content-free `HashCache`
   camera and audio embeddings as every earlier phase, on synthetic scenes. See
-  `MODEL_CARD.md` limitations 1, 3 and 4. The gate tests the *fusion channel*;
+  `docs/model_card.md` limitations 1, 3 and 4. The gate tests the *fusion channel*;
   passing it is necessary, not sufficient.
 - **Generalisation.** The gate is a deliberate 8-window overfit. It answers "can
   this architecture route information at all", not "does it work on held-out
@@ -653,9 +653,9 @@ bash scripts/kaggle_run.sh --only nuscenes      # ~2 min: result 12, trains noth
 bash scripts/kaggle_run.sh --only all           # everything in this report
 ```
 
-Raw outputs for each are under `reports/kaggle_ladder/`: the main ladder at the
-top level, `run11/` for the replication, `dist_run1/` and `dist_run2/` for
-results 7 and 8, `kv_cache/` for result 10, `ladder2/` for results 11 and 12.
+Raw outputs for each are under `reports/kaggle/`: `run9/` for the main ladder,
+`run11/` for its replication, `dist_run1/` and `dist_run2/` for results 7 and 8,
+`kv_cache/` for result 10, `ladder2/` for results 11 and 12.
 
 Single row, locally, on any CUDA device:
 

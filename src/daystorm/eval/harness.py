@@ -134,7 +134,7 @@ def main() -> int:
     ap.add_argument("--max-eval", type=int, default=16)
     ap.add_argument("--max-new", type=int, default=220)
     ap.add_argument("--cache", default="")
-    ap.add_argument("--out", default="reports")
+    ap.add_argument("--out", default="reports/local")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()

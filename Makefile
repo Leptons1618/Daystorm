@@ -1,5 +1,5 @@
 .RECIPEPREFIX = >
-PY = .venv/bin/python
+PY ?= .venv/bin/python
 
 .PHONY: test lint gate demo eval bench serve clean
 test:
@@ -15,7 +15,7 @@ demo:
 > $(PY) -m daystorm.data.synthetic --demo
 
 eval:
-> $(PY) -m daystorm.eval.harness --ckpt ckpt/stage_a --max-eval 16
+> $(PY) -m daystorm.eval.harness --ckpt ckpt/stage_a --max-eval 16 --out reports/local
 
 bench:
 > $(PY) -m daystorm.bench.latency

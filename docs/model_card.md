@@ -38,7 +38,7 @@ descending order of importance:
    prior, and it produced every latency number in this card and two of the
    three ablation tables. `HFBackbone` — the real path — has been run on a
    Tesla T4 across a ladder of five frozen pretrained backbones from 135 M to
-   3 B (`reports/phase4_backbone_ladder.md`); the Phase 1 gate passes on all of
+   3 B (`docs/findings.md`); the Phase 1 gate passes on all of
    them, and the third ablation table below is a frozen Qwen2.5-0.5B. What is
    still missing at the real scale is Qwen2.5-VL itself and anything larger
    than 0.5 B on the held-out split.
@@ -150,8 +150,8 @@ Fusion-stack dtype sweep on the T4 (p50, batch 32): fp16 3.597 ms, fp32
 4.868 ms, nf4 6.271 ms, bf16 **74.149 ms**. `torch.cuda.is_bf16_supported()`
 returns `True` on Turing because it counts emulation; there are no bf16 tensor
 cores, so bf16 runs 20.6x slower than fp16 instead of failing loudly. Full
-table in `reports/phase3_status.md`. Reproduced independently on a second T4
-and a different torch build at 19.2x — `reports/phase4_backbone_ladder.md`.
+table in `docs/benchmarks.md`. Reproduced independently on a second T4
+and a different torch build at 19.2x — `docs/findings.md`.
 
 ## Frozen-backbone gate
 
