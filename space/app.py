@@ -8,11 +8,22 @@ numbers.
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+_HERE = Path(__file__).resolve().parent
+_CANDIDATE_SRC = [
+    _HERE / "src",  # Hugging Face Space bundle (src/ copied next to app.py)
+    _HERE.parent / "src",  # repo checkout (running space/app.py)
+]
+for _src in _CANDIDATE_SRC:
+    if (_src / "daystorm").exists():
+        sys.path.insert(0, str(_src))
+        break
+else:
+    sys.path.insert(0, str(_CANDIDATE_SRC[0]))
 
 import gradio as gr
 import numpy as np
@@ -26,7 +37,29 @@ from daystorm.data.windows import describe_window
 from daystorm.model.fusion import DaystormFusion
 from daystorm.train.backbone import build_backbone
 
-CKPT = Path(__file__).parent / "ckpt" / "stage_a"
+
+def _resolve_ckpt() -> Path:
+    candidates: list[Path] = []
+    env = os.environ.get("DAYSTORM_CKPT", "")
+    if env:
+        candidates.append(Path(env))
+    candidates += [
+        _HERE / "ckpt" / "stage_a",  # Hugging Face Space bundle
+        _HERE.parent / "ckpt" / "stage_a",  # repo checkout
+    ]
+    for cand in candidates:
+        if (cand / "fusion.pt").exists():
+            return cand
+    searched = "\n  ".join(str(c) for c in candidates)
+    raise FileNotFoundError(
+        "Could not find fusion.pt. Searched:\n"
+        f"  {searched}\n"
+        "Train it with `python -m daystorm.train.stage_a --overfit 8 --steps 300` "
+        "(writes ckpt/stage_a/fusion.pt), or set DAYSTORM_CKPT to the checkpoint dir."
+    )
+
+
+CKPT = _resolve_ckpt()
 ORDER = DaystormFusion.MODALITIES
 
 blob = torch.load(CKPT / "fusion.pt", map_location="cpu", weights_only=False)
